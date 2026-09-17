@@ -1,6 +1,13 @@
 // ═══════════════════════════════════════════════════════════
 //  طبقة الاتصال بالخادم
 // ═══════════════════════════════════════════════════════════
+// أساس الخادم: يقرأ من config.js (window.API_BASE) — يُستخدم عند
+// استضافة الواجهة على نطاق مختلف عن الخادم (مثل GitHub Pages)
+const API_BASE = (typeof window !== 'undefined' && window.API_BASE)
+  ? String(window.API_BASE).replace(/\/+$/, '')
+  : '';
+const url = (p) => API_BASE + p;
+
 const TOKEN_KEY = 'sitycom.token';
 const USER_KEY = 'sitycom.user';
 
@@ -23,7 +30,7 @@ async function request(method, path, body, options = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined && !(body instanceof FormData)) headers['Content-Type'] = 'application/json';
 
-  const res = await fetch(path, {
+  const res = await fetch(url(path), {
     method,
     headers,
     body: body === undefined ? undefined : (body instanceof FormData ? body : JSON.stringify(body)),
@@ -85,7 +92,7 @@ export const api = {
   getMaj: (id) => api.get(`api/orders/${id}/maj`),
   askReturn: (id) => api.post(`api/orders/${id}/ask-return`, {}),
   quote: (wilayaId, stopDesk, type) => api.post('api/orders/quote', { wilaya_id: wilayaId, stop_desk: stopDesk ? 1 : 0, type }),
-  labelUrl: (id, download) => `api/orders/${id}/label${download ? '?download=1' : ''}`,
+  labelUrl: (id, download) => url(`api/orders/${id}/label${download ? '?download=1' : ''}`),
   importEcotrackOrders: (pages) => api.post('api/orders/import-ecotrack', { pages }),
 
   // الكتالوج
