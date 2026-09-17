@@ -1,6 +1,13 @@
 // ═══════════════════════════════════════════════════════════
 //  طبقة الاتصال بالخادم
 // ═══════════════════════════════════════════════════════════
+// أساس الخادم: يقرأ من config.js (window.API_BASE) — يُستخدم عند
+// استضافة الواجهة على نطاق مختلف عن الخادم (مثل GitHub Pages)
+const API_BASE = (typeof window !== 'undefined' && window.API_BASE)
+  ? String(window.API_BASE).replace(/\/+$/, '')
+  : '';
+const url = (p) => (API_BASE ? API_BASE + (p.startsWith('/') ? '' : '/') + p : p);
+
 const TOKEN_KEY = 'sitycom.token';
 const USER_KEY = 'sitycom.user';
 
@@ -17,13 +24,24 @@ export const clearSession = () => {
   localStorage.removeItem(USER_KEY);
 };
 
+// يضيف التوكن إلى مسار الاستعلام (قناة احتياطية)
+function withToken(path) {
+  const token = getToken();
+  return token ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : path;
+}
+
 async function request(method, path, body, options = {}) {
   const headers = { Accept: 'application/json' };
   const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // تُرسل الجلسة عبر عدة قنوات معًا — بعض الوكلاء (مثل بروكسي المعاينة)
+  // يستبعدون ترويسة Authorization، فيعتمد الخادم على X-Session-Token أو رابط الاستعلام
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+    headers['X-Session-Token'] = token;
+  }
   if (body !== undefined && !(body instanceof FormData)) headers['Content-Type'] = 'application/json';
 
-  const res = await fetch(path, {
+  const res = await fetch(url(withToken(path)), {
     method,
     headers,
     body: body === undefined ? undefined : (body instanceof FormData ? body : JSON.stringify(body)),
@@ -42,8 +60,19 @@ async function request(method, path, body, options = {}) {
     return { ok: res.ok, blob: await res.blob() };
   }
 
+  // قراءة الجسم مرة واحدة فقط — تجنّب "body stream already read"
+  // عند استجابة غير JSON (صفحة خطأ HTML مثلًا من GitHub Pages)
+  const raw = await res.text();
   let data = null;
-  try { data = await res.json(); } catch { data = { ok: false, error: await res.text() }; }
+  try {
+    data = raw.trim() ? JSON.parse(raw) : null;
+  } catch {
+    data = null;
+  }
+  if (!data || typeof data !== 'object') {
+    const isJson = type.includes('application/json');
+    data = { ok: false, error: isJson ? (raw.trim() || `HTTP ${res.status}`) : `تعذر الاتصال بالخادم (HTTP ${res.status})` };
+  }
   if (!res.ok) {
     const err = new Error((data && data.error) || `HTTP ${res.status}`);
     err.payload = data;
@@ -85,7 +114,7 @@ export const api = {
   getMaj: (id) => api.get(`api/orders/${id}/maj`),
   askReturn: (id) => api.post(`api/orders/${id}/ask-return`, {}),
   quote: (wilayaId, stopDesk, type) => api.post('api/orders/quote', { wilaya_id: wilayaId, stop_desk: stopDesk ? 1 : 0, type }),
-  labelUrl: (id, download) => `api/orders/${id}/label${download ? '?download=1' : ''}`,
+  labelUrl: (id, download) => url(withToken(`api/orders/${id}/label${download ? '?download=1' : ''}`)),
   importEcotrackOrders: (pages) => api.post('api/orders/import-ecotrack', { pages }),
 
   // الكتالوج
@@ -161,7 +190,10 @@ export const api = {
 };
 
 export function downloadBlob(url, filename) {
-  return fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
+  const t = getToken();
+  const headers = {};
+  if (t) { headers.Authorization = `Bearer ${t}`; headers['X-Session-Token'] = t; }
+  return fetch(url, { headers })
     .then((r) => r.blob())
     .then((blob) => {
       const a = document.createElement('a');

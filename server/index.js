@@ -37,6 +37,19 @@ app.use((req, res, next) => {
 
 app.use(attachUser);
 
+// سجل طلبات API — يكشف أي مشكلة في تمرير التوكن عبر الوكلاء
+app.use('/api', (req, res, next) => {
+  const t0 = Date.now();
+  res.on('finish', () => {
+    const channel = req.headers.authorization ? 'authorization'
+      : req.headers['x-session-token'] ? 'x-session-token'
+      : req.query.token ? 'query'
+      : 'none';
+    console.log(`[api] ${req.method} ${req.originalUrl.replace(/token=[^&\s]+/g, 'token=***')} → ${res.statusCode} | token=${channel} user=${req.user ? req.user.id : '-'} | ${Date.now() - t0}ms`);
+  });
+  next();
+});
+
 // ── المسارات العامة (بدون تسجيل دخول) ─────────────────────────
 app.get('/api/public/status', (_req, res) => {
   const cfg = ecotrack.getConfig();
