@@ -8,6 +8,29 @@
 --     (ينشئ الخادم المستخدم الإداري والبيانات التجريبية تلقائياً)
 -- ═══════════════════════════════════════════════════════════════════
 
+-- ── تنظيف أي محاولة سابقة ──────────────────────────────────────────
+-- يحذف جداول التطبيق إن وُجدت (مثلاً بجداول قديمة أعمدتُها uuid غير
+-- متوافقة مع المخطط الجديد) ثم يعيد إنشاءها من الصفر.
+-- ⚠️ تحذير: نفّذ هذا الملف مرة واحدة عند الإعداد الأول — إعادة تنفيذه
+-- لاحقاً تمحو بيانات التطبيق. لا تعِد تشغيله فوق بيانات مهمة.
+drop table if exists public.sync_jobs cascade;
+drop table if exists public.activity_log cascade;
+drop table if exists public.ecotrack_products cascade;
+drop table if exists public.shipping_fees cascade;
+drop table if exists public.desks cascade;
+drop table if exists public.communes cascade;
+drop table if exists public.wilayas cascade;
+drop table if exists public.order_events cascade;
+drop table if exists public.shipments cascade;
+drop table if exists public.order_items cascade;
+drop table if exists public.orders cascade;
+drop table if exists public.customers cascade;
+drop table if exists public.products cascade;
+drop table if exists public.categories cascade;
+drop table if exists public.settings cascade;
+drop table if exists public.sessions cascade;
+drop table if exists public.users cascade;
+
 -- ── الجداول ─────────────────────────────────────────────────────────
 
 create table if not exists public.users (
