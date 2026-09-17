@@ -188,6 +188,10 @@ export async function seedIfEmpty() {
       prefix: 'CMD',
       default_shipping_fee: 0,
       low_stock_alert: 5,
+      // استيراد تلقائي للطلبيات المنشأة في منصة شركة التوصيل
+      auto_import: 1,
+      auto_import_interval: 5,
+      auto_import_pages: 1,
     },
   };
   for (const [k, v] of Object.entries(defaults)) await setSetting(k, v);

@@ -26,6 +26,38 @@ if (content) {
   window.__ordersState = state;
 
   api.geoWilayas().then((r) => { state.wilayas = r.wilayas || []; build(); }).catch(() => build());
+
+  // مزامنة تلقائية: تجلب الطلبيات المنشأة في منصة شركة التوصيل
+  runAutoSync();
+}
+
+/** يسحب الطلبيات الجديدة من شركة التوصيل تلقائيًا (مع throttle من الخادم) */
+async function runAutoSync(force = false) {
+  const badge = document.getElementById('autosync-badge');
+  if (badge) { badge.className = 'badge gray'; badge.textContent = t('orders.autosync_running'); }
+  try {
+    const r = await api.autoSyncOrders(force);
+    if (r.skipped) {
+      if (badge) {
+        badge.className = r.reason === 'mock' ? 'badge mock' : 'badge gray';
+        badge.textContent = r.reason === 'mock'
+          ? t('common.mock_mode')
+          : (r.reason === 'disabled' ? t('orders.autosync_off') : t('orders.autosync_idle'));
+      }
+      return;
+    }
+    if (badge) {
+      badge.className = r.errors?.length ? 'badge warn' : 'badge done';
+      badge.textContent = t('orders.autosync_done', { n: r.imported, u: r.updated });
+    }
+    if (r.imported || r.updated) {
+      toast(t('orders.autosync_found', { n: r.imported, u: r.updated }), 'success', 6000);
+      load();
+    }
+  } catch (err) {
+    if (badge) { badge.className = 'badge bad'; badge.textContent = t('common.error'); }
+    if (force) toast(err.message, 'error', 6000);
+  }
 }
 
 function build() {
@@ -101,6 +133,8 @@ function build() {
         el('button', { class: 'btn btn-sm', text: t('common.export'), onclick: () => exportCsv() }),
         el('button', { class: 'btn btn-sm btn-danger', text: t('orders.delete_selected'), disabled: n === 0, onclick: () => bulkDelete() }),
         el('span', { style: { flex: '1' } }),
+        (() => { const b = el('span', { class: 'badge gray', text: t('orders.autosync_idle') }); b.id = 'autosync-badge'; return b; })(),
+        el('button', { class: 'btn btn-sm', title: t('orders.autosync_now'), text: '⟳', onclick: () => runAutoSync(true) }),
         el('button', { class: 'btn btn-sm', text: t('orders.import_ecotrack'), onclick: () => importEcotrack() }),
         el('a', { class: 'btn btn-sm btn-primary', href: 'orders-new.html', text: t('orders.new') }),
       ]),

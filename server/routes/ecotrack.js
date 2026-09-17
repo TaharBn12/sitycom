@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabase, must, chunk, logActivity } from '../db.js';
+import { supabase, must, chunk, logActivity, getSetting } from '../db.js';
 import { asyncRoute, HttpError, now, int, bool01 } from '../lib/util.js';
 import { requireAuth } from '../lib/auth.js';
 import * as ec from '../lib/ecotrack.js';
@@ -15,6 +15,49 @@ function mask(token) {
 }
 
 // ══════════════════════ حالة الربط ══════════════════════
+/**
+ * قدرات شركة التوصيل الحالية — تقود إظهار/إخفاء حقول شاشة «طلبية جديدة».
+ * تُشتق من الإعدادات ومن البيانات المُزامَنة فعليًا (مكاتب، أنواع الطلبيات…).
+ */
+router.get('/capabilities', requireAuth, asyncRoute(async (_req, res) => {
+  const cfg = await ec.getConfig();
+  const eco = (await getSetting('ecotrack', {})) || {};
+
+  // هل توجد مكاتب Stop Desk مُزامَنة؟
+  const desksRows = must(await supabase.from('desks').select('id').limit(1), 'cap.desks');
+  const hasDesks = desksRows.length > 0;
+
+  // الحقول الاختيارية: يمكن للمستخدم تعطيلها يدويًا من الإعدادات
+  const off = Array.isArray(eco.disabled_fields) ? eco.disabled_fields : [];
+  const on = (name, dflt = true) => (off.includes(name) ? false : dflt);
+
+  res.json({
+    ok: true,
+    capabilities: {
+      carrier_name: eco.carrier_name || 'Ecotrack',
+      base_url: cfg.baseUrl || '',
+      mock: cfg.mock,
+      // الحقول المدعومة
+      stop_desk: on('stop_desk', hasDesks),
+      desk_select: on('desk_select', hasDesks),
+      weight: on('weight'),
+      fragile: on('fragile'),
+      gps_link: on('gps_link'),
+      boutique: on('boutique'),
+      stock: on('stock'),
+      produit_a_recuperer: on('produit_a_recuperer'),
+      ask_collection: on('ask_collection'),
+      phone2: on('phone2'),
+      reference: on('reference'),
+      // أنواع الطلبيات المتاحة
+      types: Array.isArray(eco.enabled_types) && eco.enabled_types.length
+        ? eco.enabled_types.map(Number)
+        : [1, 2, 3, 4],
+      disabled_fields: off,
+    },
+  });
+}));
+
 /** تشخيص الربط: يعرض الرد الخام من Ecotrack لتحديد سبب فشل الولايات */
 router.get('/diagnose', requireAuth, asyncRoute(async (_req, res) => {
   const cfg = await ec.getConfig();
