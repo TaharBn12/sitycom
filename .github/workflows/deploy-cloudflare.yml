@@ -8,6 +8,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,30 +22,34 @@ jobs:
       - name: تثبيت الاعتماديات
         run: npm ci
 
-      # يرفع فقط الأسرار المعرّفة فعلًا (Ecotrack اختياري — يُضبط من لوحة التحكم)
-      - name: تحديد الأسرار المتوفّرة
-        id: sec
-        run: |
-          list=""
-          [ -n "${{ secrets.SUPABASE_URL }}" ]       && list="${list}SUPABASE_URL"$'\n'
-          [ -n "${{ secrets.SUPABASE_ANON_KEY }}" ]  && list="${list}SUPABASE_ANON_KEY"$'\n'
-          [ -n "${{ secrets.ECOTRACK_BASE_URL }}" ]  && list="${list}ECOTRACK_BASE_URL"$'\n'
-          [ -n "${{ secrets.ECOTRACK_API_TOKEN }}" ] && list="${list}ECOTRACK_API_TOKEN"$'\n'
-          {
-            echo "list<<EOF"
-            printf '%s' "$list"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+      # 1) النشر أولًا — ينشئ الـWorker إن لم يكن موجودًا
+      - name: نشر الـWorker
+        run: npx wrangler deploy
 
-      - name: النشر ورفع الأسرار
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
-          secrets: ${{ steps.sec.outputs.list }}
+      # 2) ثم رفع الأسرار المتوفّرة فقط (Ecotrack اختياري)
+      - name: رفع الأسرار
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           ECOTRACK_BASE_URL: ${{ secrets.ECOTRACK_BASE_URL }}
           ECOTRACK_API_TOKEN: ${{ secrets.ECOTRACK_API_TOKEN }}
+        run: |
+          node -e '
+            const keys = ["SUPABASE_URL","SUPABASE_ANON_KEY","ECOTRACK_BASE_URL","ECOTRACK_API_TOKEN"];
+            const out = {};
+            for (const k of keys) if (process.env[k]) out[k] = process.env[k];
+            if (!Object.keys(out).length) { console.log("لا توجد أسرار للرفع"); process.exit(0); }
+            require("fs").writeFileSync("/tmp/secrets.json", JSON.stringify(out));
+            console.log("سيتم رفع: " + Object.keys(out).join(", "));
+          '
+          if [ -f /tmp/secrets.json ]; then
+            npx wrangler secret bulk /tmp/secrets.json
+            rm -f /tmp/secrets.json
+          fi
+
+      # 3) إعادة النشر لتفعيل الأسرار الجديدة
+      - name: تفعيل الأسرار
+        run: npx wrangler deploy
+
+      - name: الرابط
+        run: echo "✔ تم النشر — افتح لوحة Cloudflare ← Workers & Pages ← sitycom"
