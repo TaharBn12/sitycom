@@ -1,10 +1,11 @@
-import { resetDb, DB_PATH } from '../db.js';
-import fs from 'node:fs';
+import '../lib/env.js';
+import { resetDb } from '../db.js';
 
-for (const suffix of ['', '-wal', '-shm']) {
-  const p = DB_PATH + suffix;
-  if (fs.existsSync(p)) fs.rmSync(p);
+try {
+  await resetDb();
+  console.log('✔ تمت إعادة تهيئة قاعدة البيانات على Supabase مع البيانات التجريبية');
+  process.exit(0);
+} catch (err) {
+  console.error('✖ فشلت إعادة التهيئة:', err.message);
+  process.exit(1);
 }
-resetDb();
-console.log('✔ تمت إعادة تهيئة قاعدة البيانات والبيانات التجريبية');
-process.exit(0);

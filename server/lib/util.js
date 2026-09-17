@@ -11,7 +11,7 @@ export class HttpError extends Error {
 export const asyncRoute = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 
-/** node:sqlite يقبل فقط null | number | bigint | string | Uint8Array */
+/** تبسيط القيم قبل إرسالها إلى قاعدة البيانات */
 export function sqlValues(params) {
   return params.map((p) => {
     if (p === undefined || p === null) return null;

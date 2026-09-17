@@ -1,34 +1,38 @@
-import { get, run, all } from '../db.js';
+import { supabase, must } from '../db.js';
 import { uid, now, HttpError } from './util.js';
 
 const SESSION_DAYS = 7;
 
-export function createSession(userId) {
+export async function createSession(userId) {
   const token = uid('sess_');
   const expires = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
-  run('INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)',
-    [token, userId, expires, now()]);
+  must(
+    await supabase.from('sessions').insert({ token, user_id: userId, expires_at: expires, created_at: now() }),
+    'session.create',
+  );
   return { token, expires_at: expires };
 }
 
-export function destroySession(token) {
-  run('DELETE FROM sessions WHERE token = ?', [token]);
+export async function destroySession(token) {
+  must(await supabase.from('sessions').delete().eq('token', token), 'session.delete');
 }
 
-export function userFromToken(token) {
+export async function userFromToken(token) {
   if (!token) return null;
-  const row = get(
-    `SELECT u.id, u.username, u.name, u.role, s.expires_at
-     FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.token = ? AND u.active = 1`,
-    [token],
+  const row = must(
+    await supabase
+      .from('sessions')
+      .select('expires_at, users:user_id(id, username, name, role, active)')
+      .eq('token', token)
+      .maybeSingle(),
+    'session.lookup',
   );
-  if (!row) return null;
+  if (!row || !row.users || Number(row.users.active) !== 1) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
-    run('DELETE FROM sessions WHERE token = ?', [token]);
+    await destroySession(token);
     return null;
   }
-  return { id: row.id, username: row.username, name: row.name, role: row.role };
+  return { id: row.users.id, username: row.users.username, name: row.users.name, role: row.users.role };
 }
 
 function readToken(req) {
@@ -40,8 +44,9 @@ function readToken(req) {
 export function attachUser(req, _res, next) {
   const token = readToken(req);
   req.token = token;
-  req.user = userFromToken(token);
-  next();
+  userFromToken(token)
+    .then((user) => { req.user = user; next(); })
+    .catch((err) => { console.error('[auth]', err.message); req.user = null; next(); });
 }
 
 export function requireAuth(req, _res, next) {
@@ -50,10 +55,13 @@ export function requireAuth(req, _res, next) {
 }
 
 /** تنظيف الجلسات المنتهية */
-export function purgeSessions() {
-  run('DELETE FROM sessions WHERE expires_at < ?', [new Date().toISOString()]);
+export async function purgeSessions() {
+  must(
+    await supabase.from('sessions').delete().lt('expires_at', new Date().toISOString()),
+    'sessions.purge',
+  );
 }
 
-export function listSessions() {
-  return all('SELECT token, user_id, expires_at FROM sessions');
+export async function listSessions() {
+  return must(await supabase.from('sessions').select('token, user_id, expires_at'), 'sessions.list');
 }
