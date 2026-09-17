@@ -22,14 +22,6 @@ jobs:
         run: npm ci
 
       # 1) النشر أولًا — ينشئ الـWorker إن لم يكن موجودًا
-      - name: فحص التوكن
-        run: |
-          code=$(curl -s -o /tmp/verify.json -w '%{http_code}' \
-            https://api.cloudflare.com/client/v4/user/tokens/verify \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          body=$(tr -d '\n' < /tmp/verify.json | head -c 400)
-          echo "::error title=DIAG::acct_len=${#CLOUDFLARE_ACCOUNT_ID} token_len=${#CLOUDFLARE_API_TOKEN} verify_http=$code body=$body"
-
       - name: نشر الـWorker
         run: |
           set +e
@@ -67,5 +59,13 @@ jobs:
       - name: تفعيل الأسرار
         run: npx wrangler deploy
 
-      - name: الرابط
-        run: echo "✔ تم النشر — افتح لوحة Cloudflare ← Workers & Pages ← sitycom"
+      - name: التحقق من الموقع
+        run: |
+          url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/deploy.log | tail -1)
+          [ -z "$url" ] && url="https://sitycom.$(npx wrangler whoami >/dev/null 2>&1; echo unknown).workers.dev"
+          echo "URL=$url"
+          sleep 5
+          home=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$url/")
+          reg=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$url/register.html")
+          health=$(curl -s -m 20 "$url/api/health" | head -c 250)
+          echo "::notice title=الموقع::$url | / =$home | /register.html =$reg | health=$health"
