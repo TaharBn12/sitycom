@@ -19,14 +19,14 @@
     <form id="login-form">
       <div class="field">
         <label data-i18n="login.username">اسم المستخدم</label>
-        <input type="text" id="username" autocomplete="username" value="admin" required />
+        <input type="text" id="username" autocomplete="username"placeholder="username" required />
       </div>
       <div class="field">
         <label data-i18n="login.password">كلمة المرور</label>
-        <input type="password" id="password" autocomplete="current-password" value="admin123" required />
+        <input type="password" id="password" autocomplete="current-password"placeholder="••••••" required />
       </div>
       <button type="submit" class="btn btn-primary btn-block" id="login-btn" data-i18n="login.submit">دخول</button>
-      <p class="muted center mt-2" data-i18n="login.demo" style="font-size:12px">للتجربة: admin / admin123</p>
+      <p class="muted center mt-2" style="font-size:13px"><span data-i18n="login.no_account">ليس لديك حساب؟</span> <a href="register.html" data-i18n="login.create">إنشاء حساب جديد</a></p>
     </form>
     <div class="flex center" style="margin-top:14px">
       <div id="lang-box"></div>

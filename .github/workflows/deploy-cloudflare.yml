@@ -1,0 +1,71 @@
+name: نشر على Cloudflare Workers
+
+on:
+  push:
+    branches: [main, 'arena/**']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: تثبيت الاعتماديات
+        run: npm ci
+
+      # 1) النشر أولًا — ينشئ الـWorker إن لم يكن موجودًا
+      - name: نشر الـWorker
+        run: |
+          set +e
+          npx wrangler deploy > /tmp/deploy.log 2>&1
+          status=$?
+          cat /tmp/deploy.log
+          if [ $status -ne 0 ]; then
+            msg=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/deploy.log | tr '\n' ' ' | tail -c 800)
+            echo "::error title=DEPLOY::$msg"
+          fi
+          exit $status
+
+      # 2) ثم رفع الأسرار المتوفّرة فقط (Ecotrack اختياري)
+      - name: رفع الأسرار
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          ECOTRACK_BASE_URL: ${{ secrets.ECOTRACK_BASE_URL }}
+          ECOTRACK_API_TOKEN: ${{ secrets.ECOTRACK_API_TOKEN }}
+        run: |
+          node -e '
+            const keys = ["SUPABASE_URL","SUPABASE_ANON_KEY","ECOTRACK_BASE_URL","ECOTRACK_API_TOKEN"];
+            const out = {};
+            for (const k of keys) if (process.env[k]) out[k] = process.env[k];
+            if (!Object.keys(out).length) { console.log("لا توجد أسرار للرفع"); process.exit(0); }
+            require("fs").writeFileSync("/tmp/secrets.json", JSON.stringify(out));
+            console.log("سيتم رفع: " + Object.keys(out).join(", "));
+          '
+          if [ -f /tmp/secrets.json ]; then
+            npx wrangler secret bulk /tmp/secrets.json
+            rm -f /tmp/secrets.json
+          fi
+
+      # 3) إعادة النشر لتفعيل الأسرار الجديدة
+      - name: تفعيل الأسرار
+        run: npx wrangler deploy
+
+      - name: التحقق من الموقع
+        run: |
+          url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/deploy.log | tail -1)
+          [ -z "$url" ] && url="https://sitycom.$(npx wrangler whoami >/dev/null 2>&1; echo unknown).workers.dev"
+          echo "URL=$url"
+          sleep 5
+          home=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$url/")
+          reg=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$url/register.html")
+          health=$(curl -s -m 20 "$url/api/health" | head -c 250)
+          echo "::notice title=الموقع::$url | / =$home | /register.html =$reg | health=$health"

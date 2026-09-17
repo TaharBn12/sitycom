@@ -7,6 +7,7 @@ const content = await initShell({ active: 'orders-new', title: 'orders.new' });
 if (content) {
   const state = {
     wilayas: [], communes: [], desks: [], fees: [], products: [],
+    caps: {},
     items: [],
     shippingFee: 0,
     autoFee: true,
@@ -30,6 +31,11 @@ if (content) {
     const p = await api.products({ limit: 500, status: 'active' });
     state.products = p.products || [];
   } catch { /* ignore */ }
+  // قدرات شركة التوصيل — تحدّد الحقول المعروضة
+  try {
+    const c = await api.carrierCapabilities();
+    state.caps = c.capabilities || {};
+  } catch { state.caps = {}; }
 
   build();
 }
@@ -202,7 +208,8 @@ function build() {
 
   /* ── خيارات الشحن ───────────────────────────────────── */
   const typeSel = el('select');
-  [1, 2, 3, 4].forEach((n2) => typeSel.appendChild(el('option', { value: n2, text: t(`orders.type${n2}`) })));
+  const allowedTypes = (Array.isArray(s.caps.types) && s.caps.types.length) ? s.caps.types : [1, 2, 3, 4];
+  allowedTypes.forEach((n2) => typeSel.appendChild(el('option', { value: n2, text: t(`orders.type${n2}`) })));
   typeSel.addEventListener('change', () => { s.type = Number(typeSel.value); updateFee(); });
 
   const weight = el('input', { type: 'number', value: '1', step: '0.1' });
@@ -314,6 +321,45 @@ function build() {
   ]));
 
   renderItems();
+  applyCapabilities();
+
+  /* ── إظهار/إخفاء الحقول حسب قدرات شركة التوصيل ───────── */
+  function applyCapabilities() {
+    const caps = s.caps || {};
+    const has = (k) => caps[k] !== false;      // الافتراضي: مدعوم
+    const hideWrap = (node) => {
+      if (!node) return;
+      const wrap = node.closest ? (node.closest('.field') || node.closest('label.checkbox') || node) : node;
+      wrap.hidden = true;
+      wrap.style.display = 'none';
+    };
+
+    if (!has('phone2')) hideWrap(cPhone2);
+    if (!has('gps_link')) hideWrap(gps);
+    if (!has('weight')) hideWrap(weight);
+    if (!has('fragile')) hideWrap(fragile);
+    if (!has('boutique')) hideWrap(boutique);
+    if (!has('reference')) hideWrap(reference);
+    if (!has('stock')) { hideWrap(stockFlag); hideWrap(quantite); }
+    if (!has('produit_a_recuperer')) hideWrap(recover);
+    if (!has('ask_collection')) hideWrap(askCollection);
+    if (!has('stop_desk')) {
+      hideWrap(stopDeskBox);
+      deskBox.hidden = true;
+      deskBox.style.display = 'none';
+    } else if (!has('desk_select')) {
+      deskBox.style.display = 'none';
+    }
+
+    // شارة اسم شركة التوصيل
+    const name = caps.carrier_name || 'Ecotrack';
+    const badge = el('span', {
+      class: caps.mock ? 'badge mock' : 'badge done',
+      text: caps.mock ? `${name} — ${t('common.mock_mode')}` : `${name} — ${t('common.live_mode')}`,
+    });
+    const head = content.querySelector('.card-head h3');
+    if (head && head.parentElement) head.parentElement.appendChild(badge);
+  }
 
   /* ── الحفظ ──────────────────────────────────────────── */
   async function save(push, validate) {

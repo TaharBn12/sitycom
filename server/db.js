@@ -8,21 +8,33 @@ import { createClient } from '@supabase/supabase-js';
 import { WILAYAS, COMMUNES, mockFees } from './data/geo.js';
 import { hashPassword, now, uid } from './lib/util.js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+// العميل يُنشأ عند أول استعمال (كسول) — ضروري على Cloudflare Workers
+// حيث لا تتوفّر متغيرات البيئة أثناء تقييم الوحدات.
+let _client = null;
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.error('─'.repeat(60));
-  console.error('  ⚠️  إعدادات Supabase ناقصة');
-  console.error('  أضف في ملف .env:');
-  console.error('    SUPABASE_URL=https://xxxxxxxx.supabase.co');
-  console.error('    SUPABASE_ANON_KEY=eyJ...');
-  console.error('─'.repeat(60));
-  process.exit(1);
+export function getSupabase() {
+  if (_client) return _client;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    throw new Error(
+      'إعدادات Supabase ناقصة — اضبط SUPABASE_URL و SUPABASE_ANON_KEY '
+      + '(ملف .env محليًا، أو أسرار Cloudflare عند النشر)',
+    );
+  }
+  _client = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return _client;
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
+/** واجهة متوافقة مع الاستعمال القديم: supabase.from(...) */
+export const supabase = new Proxy({}, {
+  get(_t, prop) {
+    const client = getSupabase();
+    const value = client[prop];
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
 });
 
 /** PostgREST لا يعيد أكثر من 1000 سطر في الطلب الواحد */
@@ -132,18 +144,21 @@ export async function seedIfEmpty() {
 
   const stamp = now();
 
-  // المستخدم الإداري
-  must(
-    await supabase.from('users').insert({
-      username: process.env.ADMIN_USERNAME || 'admin',
-      name: 'المدير',
-      password_hash: hashPassword(process.env.ADMIN_PASSWORD || 'admin123'),
-      role: 'admin',
-      active: 1,
-      created_at: stamp,
-    }),
-    'seed.user',
-  );
+  // المستخدم الإداري — يُنشأ فقط إذا وُجدت بيانات في .env
+  // وإلا يُنشئ أول مستخدم حسابه بنفسه من صفحة register.html (ويصبح مديرًا)
+  if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
+    must(
+      await supabase.from('users').insert({
+        username: String(process.env.ADMIN_USERNAME).trim().toLowerCase(),
+        name: process.env.ADMIN_NAME || 'المدير',
+        password_hash: hashPassword(process.env.ADMIN_PASSWORD),
+        role: 'admin',
+        active: 1,
+        created_at: stamp,
+      }),
+      'seed.user',
+    );
+  }
 
   // الإعدادات الافتراضية
   const defaults = {
@@ -173,6 +188,10 @@ export async function seedIfEmpty() {
       prefix: 'CMD',
       default_shipping_fee: 0,
       low_stock_alert: 5,
+      // استيراد تلقائي للطلبيات المنشأة في منصة شركة التوصيل
+      auto_import: 1,
+      auto_import_interval: 5,
+      auto_import_pages: 1,
     },
   };
   for (const [k, v] of Object.entries(defaults)) await setSetting(k, v);

@@ -2,7 +2,7 @@ name: نشر الموقع على GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
   workflow_dispatch:
 
 permissions:

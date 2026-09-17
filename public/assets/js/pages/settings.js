@@ -91,6 +91,20 @@ function storeTab() {
   host.appendChild(el('label', { class: 'checkbox mb-2' }, [autoValidate, el('span', { text: t('settings.auto_validate') })]));
   host.appendChild(el('label', { class: 'checkbox mb-2' }, [askCollection, el('span', { text: t('orders.ask_collection') })]));
 
+  // ── الاستيراد التلقائي من شركة التوصيل ──
+  const autoImport = el('input', { type: 'checkbox' });
+  autoImport.dataset.group = 'orders';
+  autoImport.dataset.key = 'auto_import';
+  autoImport.checked = ord.auto_import !== 0;
+
+  host.appendChild(el('div', { class: 'sep' }));
+  host.appendChild(el('h3', { text: t('settings.auto_import') }));
+  host.appendChild(el('label', { class: 'checkbox mb-2' }, [autoImport, el('span', { text: t('settings.auto_import') })]));
+  host.appendChild(el('div', { class: 'form-row' }, [
+    field(t('settings.auto_import_interval'), mk('orders', 'auto_import_interval', ord.auto_import_interval ?? 5, 'number')),
+    field(t('settings.auto_import_pages'), mk('orders', 'auto_import_pages', ord.auto_import_pages ?? 1, 'number')),
+  ]));
+
   host.appendChild(el('div', { class: 'btn-group mt-2' }, [
     el('button', {
       class: 'btn btn-primary btn-sm', text: t('common.save'),

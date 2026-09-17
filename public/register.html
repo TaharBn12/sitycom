@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sitycom — إنشاء حساب</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+</head>
+<body class="login-page">
+  <div class="login-card">
+    <div class="brand">
+      <div class="logo">س</div>
+      <div>
+        <h2 style="margin:0" data-i18n="register.title">إنشاء حساب</h2>
+        <small data-i18n="register.subtitle">أنشئ حسابك للدخول إلى لوحة التحكم</small>
+      </div>
+    </div>
+    <form id="register-form">
+      <div class="field">
+        <label data-i18n="register.name">الاسم الكامل</label>
+        <input type="text" id="name" autocomplete="name" />
+      </div>
+      <div class="field">
+        <label data-i18n="register.username">اسم المستخدم</label>
+        <input type="text" id="username" autocomplete="username" placeholder="username" required />
+      </div>
+      <div class="field">
+        <label data-i18n="register.password">كلمة المرور</label>
+        <input type="password" id="password" autocomplete="new-password" placeholder="••••••" minlength="6" required />
+      </div>
+      <div class="field">
+        <label data-i18n="register.confirm">تأكيد كلمة المرور</label>
+        <input type="password" id="confirm" autocomplete="new-password" placeholder="••••••" minlength="6" required />
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" id="register-btn" data-i18n="register.submit">إنشاء الحساب</button>
+      <p class="muted center mt-2" style="font-size:13px">
+        <span data-i18n="register.have_account">لديك حساب بالفعل؟</span>
+        <a href="login.html" data-i18n="register.login">تسجيل الدخول</a>
+      </p>
+    </form>
+    <div class="flex center" style="margin-top:14px">
+      <div id="lang-box"></div>
+    </div>
+  </div>
+  <div id="toasts"></div>
+  <script src="config.js"></script>
+  <script type="module" src="assets/js/pages/register.js"></script>
+</body>
+</html>

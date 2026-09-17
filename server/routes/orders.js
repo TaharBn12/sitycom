@@ -3,6 +3,7 @@ import { supabase, must, getSetting, logActivity } from '../db.js';
 import { asyncRoute, HttpError, now, pagination, num, int, bool01, orderNumber } from '../lib/util.js';
 import { requireAuth } from '../lib/auth.js';
 import * as ecotrack from '../lib/ecotrack.js';
+import { importFromCarrier, getAutoSyncState, setAutoSyncState } from '../lib/import-ecotrack.js';
 
 const router = express.Router();
 
@@ -750,107 +751,72 @@ router.post('/sync-status', requireAuth, asyncRoute(async (req, res) => {
 /** سحب طلبيات Ecotrack إلى المحلي (15. get/orders) */
 router.post('/import-ecotrack', requireAuth, asyncRoute(async (req, res) => {
   const { pages = 1, start_date, end_date } = req.body || {};
-  let imported = 0;
-  let updated = 0;
-  const errors = [];
-  for (let p = 1; p <= Math.min(20, Number(pages) || 1); p += 1) {
-    let r;
-    try {
-      r = await ecotrack.getOrders({ page: p, start_date, end_date });
-    } catch (err) { errors.push(err.message); break; }
-    const rows = r.data?.data || (Array.isArray(r.data) ? r.data : []);
-    for (const row of rows) {
-      const tracking = row.tracking;
-      if (!tracking) continue;
-      const exists = must(
-        await supabase.from('shipments').select('order_id').eq('tracking', tracking).maybeSingle(),
-        'import.find',
-      );
-      if (exists) {
-        await saveShipment(exists.order_id, {
-          ecotrack_status: row.status || '',
-          last_activity: '',
-          synced_at: now(),
-          raw: JSON.stringify(row),
-        });
-        await supabase.from('orders')
-          .update({ status: row.status || 'prete_a_expedier', updated_at: now() })
-          .eq('id', exists.order_id);
-        updated += 1;
-        continue;
-      }
-      const wilayaId = num(row.wilaya_id, 0) || null;
-      const wilaya = wilayaId
-        ? must(await supabase.from('wilayas').select('name_fr').eq('wilaya_id', wilayaId).maybeSingle(), 'import.wilaya')
-        : null;
-      let orderNum = row.reference || `ECO-${tracking}`;
-      const numExists = must(
-        await supabase.from('orders').select('id').eq('order_number', orderNum).maybeSingle(),
-        'import.numcheck',
-      );
-      if (numExists) {
-        orderNum = `${orderNum}-${tracking}`;
-      }
-      const stamp = now();
-      const orderRow = must(
-        await supabase.from('orders').insert({
-          order_number: orderNum,
-          customer_id: null,
-          customer_name: row.client || 'عميل Ecotrack',
-          phone: String(row.phone || ''),
-          phone2: String(row.phone_2 || ''),
-          wilaya_id: wilayaId,
-          wilaya_name: wilaya ? wilaya.name_fr : '',
-          commune: row.commune || '',
-          address: row.adresse || '',
-          stop_desk: 0,
-          subtotal: num(row.montant) - num(row.tarif_prestation),
-          shipping_fee: num(row.tarif_prestation),
-          discount: 0,
-          total: num(row.montant),
-          status: row.status || 'prete_a_expedier',
-          payment_status: ['encaisse_non_paye', 'paiements_prets', 'paye_et_archive'].includes(row.status) ? 'collected' : 'unpaid',
-          source: 'ecotrack',
-          notes: `مستوردة من Ecotrack (${tracking})`,
-          created_at: stamp,
-          updated_at: stamp,
-        }).select('id').single(),
-        'import.order',
-      );
-      const orderId = Number(orderRow.id);
-      must(
-        await supabase.from('order_items').insert({
-          order_id: orderId,
-          product_id: null,
-          name: row.products || 'منتج',
-          sku: '',
-          qty: 1,
-          unit_price: num(row.montant) - num(row.tarif_prestation),
-          line_total: num(row.montant) - num(row.tarif_prestation),
-        }),
-        'import.item',
-      );
-      must(
-        await supabase.from('shipments').insert({
-          order_id: orderId,
-          tracking,
-          reference: orderNum,
-          type: num(row.type_id, 1),
-          stop_desk: 0,
-          produit: row.products || '',
-          ecotrack_status: row.status || '',
-          delivery_fee: num(row.tarif_prestation),
-          pushed_at: now(),
-          synced_at: now(),
-          raw: JSON.stringify(row),
-        }),
-        'import.shipment',
-      );
-      imported += 1;
+  const r = await importFromCarrier({ pages, start_date, end_date });
+  await setAutoSyncState({ last_run: now(), last_result: r });
+  await logActivity(
+    req.user.id, req.user.username, 'ecotrack.import', 'order', '',
+    `${r.imported} جديدة / ${r.updated} محدّثة`, r.errors.length === 0,
+  );
+  res.json({ ok: r.errors.length === 0, ...r });
+}));
+
+/**
+ * مزامنة تلقائية خفيفة — تُستدعى عند فتح صفحة الطلبيات.
+ * تسحب أحدث صفحة فقط، وتحترم فاصلًا زمنيًا لتفادي استنزاف حصة الـAPI.
+ */
+router.post('/auto-sync', requireAuth, asyncRoute(async (req, res) => {
+  const cfg = await ecotrack.getConfig();
+  if (cfg.mock) {
+    return res.json({ ok: true, skipped: true, reason: 'mock', message: 'الوضع تجريبي — المزامنة التلقائية معطّلة' });
+  }
+
+  const settings = (await getSetting('orders', {})) || {};
+  if (settings.auto_import === 0) {
+    return res.json({ ok: true, skipped: true, reason: 'disabled' });
+  }
+
+  const intervalMin = Math.max(1, Number(settings.auto_import_interval ?? 5));
+  const state = await getAutoSyncState();
+  const force = bool01(req.body?.force);
+  if (!force && state.last_run) {
+    const elapsed = Date.now() - new Date(state.last_run).getTime();
+    if (elapsed < intervalMin * 60000) {
+      return res.json({
+        ok: true,
+        skipped: true,
+        reason: 'throttled',
+        next_in_sec: Math.ceil((intervalMin * 60000 - elapsed) / 1000),
+        last_result: state.last_result || null,
+      });
     }
   }
-  await logActivity(req.user.id, req.user.username, 'ecotrack.import', 'order', '', `${imported} جديدة / ${updated} محدّثة`, errors.length === 0);
-  res.json({ ok: errors.length === 0, imported, updated, errors });
+
+  const pages = Math.min(5, Math.max(1, Number(settings.auto_import_pages ?? 1)));
+  const r = await importFromCarrier({ pages });
+  await setAutoSyncState({ last_run: now(), last_result: r });
+  if (r.imported || r.updated) {
+    await logActivity(
+      req.user.id, req.user.username, 'ecotrack.auto_sync', 'order', '',
+      `${r.imported} جديدة / ${r.updated} محدّثة`, r.errors.length === 0,
+    );
+  }
+  res.json({ ok: r.errors.length === 0, skipped: false, ...r });
+}));
+
+/** حالة المزامنة التلقائية */
+router.get('/auto-sync/state', requireAuth, asyncRoute(async (_req, res) => {
+  const state = await getAutoSyncState();
+  const settings = (await getSetting('orders', {})) || {};
+  const cfg = await ecotrack.getConfig();
+  res.json({
+    ok: true,
+    enabled: settings.auto_import !== 0 && !cfg.mock,
+    mock: cfg.mock,
+    interval_min: Number(settings.auto_import_interval ?? 5),
+    pages: Number(settings.auto_import_pages ?? 1),
+    last_run: state.last_run || null,
+    last_result: state.last_result || null,
+  });
 }));
 
 /** حساب سعر التوصيل المحفوظ محلياً */

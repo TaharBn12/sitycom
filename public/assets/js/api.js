@@ -90,6 +90,7 @@ export const api = {
 
   // المصادقة
   login: (username, password) => request('POST', 'api/auth/login', { username, password }),
+  register: (payload) => request('POST', 'api/auth/register', payload),
   logout: () => request('POST', 'api/auth/logout', {}).catch(() => null),
   me: () => request('GET', 'api/auth/me'),
 
@@ -116,6 +117,8 @@ export const api = {
   quote: (wilayaId, stopDesk, type) => api.post('api/orders/quote', { wilaya_id: wilayaId, stop_desk: stopDesk ? 1 : 0, type }),
   labelUrl: (id, download) => url(withToken(`api/orders/${id}/label${download ? '?download=1' : ''}`)),
   importEcotrackOrders: (pages) => api.post('api/orders/import-ecotrack', { pages }),
+  autoSyncOrders: (force) => api.post('api/orders/auto-sync', { force: force ? 1 : 0 }),
+  autoSyncState: () => api.get('api/orders/auto-sync/state'),
 
   // الكتالوج
   products: (params = {}) => api.get('api/catalog/products?' + new URLSearchParams(params)),
@@ -136,6 +139,8 @@ export const api = {
 
   // Ecotrack
   ecoStatus: () => api.get('api/ecotrack/status'),
+  carrierCapabilities: () => api.get('api/ecotrack/capabilities'),
+  ecoDiagnose: () => api.get('api/ecotrack/diagnose'),
   ecoTest: (payload) => api.post('api/ecotrack/test', payload || {}),
   ecoRateLimit: () => api.get('api/ecotrack/rate-limit'),
   ecoWilayas: () => api.get('api/ecotrack/wilayas'),
