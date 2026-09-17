@@ -19,12 +19,20 @@ jobs:
       - name: تثبيت الاعتماديات
         run: npm ci
 
-      - name: النشر
+      - name: النشر ورفع الأسرار
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+          # تُرفع كأسرار للـWorker (يجب تعريفها في GitHub Secrets)
+          secrets: |
+            SUPABASE_URL
+            SUPABASE_ANON_KEY
+            ECOTRACK_BASE_URL
+            ECOTRACK_API_TOKEN
         env:
-          # تُضبط مرة واحدة كأسرار للمستودع، وتُرفع كأسرار للـWorker
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          ECOTRACK_BASE_URL: ${{ secrets.ECOTRACK_BASE_URL }}
+          ECOTRACK_API_TOKEN: ${{ secrets.ECOTRACK_API_TOKEN }}
