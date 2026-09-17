@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sitycom — تتبع الطلبية</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+</head>
+<body class="track-page">
+  <div class="track-card">
+    <div class="track-hero">
+      <div class="logo">س</div>
+      <h1 id="store-name" data-i18n="track.title">تتبّع طلبيّتك</h1>
+      <p class="muted" data-i18n="track.subtitle">أدخل رقم التتبع لمعرفة حالة الطرد</p>
+      <div class="flex center" style="margin-top:10px"><div id="lang-box"></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <div class="flex" style="gap:10px">
+          <input type="text" id="tracking-input" style="flex:1" data-i18n-placeholder="tracking.placeholder" placeholder="أدخل رقم التتبع…" />
+          <button class="btn btn-primary" id="track-btn" data-i18n="tracking.find">تتبّع</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="track-result"></div>
+
+    <p class="center muted" style="font-size:12px;margin-top:20px">
+      <a href="login.html">دخول لوحة التحكم</a>
+    </p>
+  </div>
+  <div id="toasts"></div>
+  <script type="module" src="assets/js/pages/track-public.js"></script>
+</body>
+</html>
