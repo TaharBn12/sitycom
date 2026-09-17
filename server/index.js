@@ -129,7 +129,7 @@ app.listen(PORT, HOST, () => {
   console.log('─'.repeat(60));
   console.log('  Sitycom — منصة التجارة الإلكترونية + Ecotrack');
   console.log(`  الخادم:   http://localhost:${PORT}`);
-  console.log(`  لوحة التحكم: http://localhost:${PORT}/admin.html`);
+  console.log(`  لوحة التحكم: http://localhost:${PORT}/`);
   if (process.env.ADMIN_USERNAME) {
     console.log(`  الدخول: ${process.env.ADMIN_USERNAME} / ${process.env.ADMIN_PASSWORD || 'admin123'}`);
   }
