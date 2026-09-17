@@ -25,16 +25,23 @@ jobs:
       # 1) النشر أولًا — ينشئ الـWorker إن لم يكن موجودًا
       - name: فحص التوكن
         run: |
-          echo "ACCOUNT_ID length: ${#CLOUDFLARE_ACCOUNT_ID}"
-          echo "API_TOKEN length: ${#CLOUDFLARE_API_TOKEN}"
           code=$(curl -s -o /tmp/verify.json -w '%{http_code}' \
             https://api.cloudflare.com/client/v4/user/tokens/verify \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          echo "verify HTTP $code"
-          cat /tmp/verify.json | head -c 600; echo
+          body=$(tr -d '\n' < /tmp/verify.json | head -c 400)
+          echo "::error title=DIAG::acct_len=${#CLOUDFLARE_ACCOUNT_ID} token_len=${#CLOUDFLARE_API_TOKEN} verify_http=$code body=$body"
 
       - name: نشر الـWorker
-        run: npx wrangler deploy 2>&1 | tee /tmp/deploy.log
+        run: |
+          set +e
+          npx wrangler deploy > /tmp/deploy.log 2>&1
+          status=$?
+          cat /tmp/deploy.log
+          if [ $status -ne 0 ]; then
+            msg=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/deploy.log | tr '\n' ' ' | tail -c 800)
+            echo "::error title=DEPLOY::$msg"
+          fi
+          exit $status
 
       # 2) ثم رفع الأسرار المتوفّرة فقط (Ecotrack اختياري)
       - name: رفع الأسرار
