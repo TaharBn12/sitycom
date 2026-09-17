@@ -22,7 +22,7 @@ npm install          # يُثبّت Express فقط
 npm start            # http://localhost:3000
 ```
 
-- لوحة التحكم: <http://localhost:3000/admin.html> (أو `/index.html`)
+- لوحة التحكم: <http://localhost:3000/> (أو `/index.html`)
 - صفحة تتبّع الزبون (عمومية بدون دخول): <http://localhost:3000/track.html>
 - بيانات الدخول التجريبية: `admin` / `admin123`
 
@@ -47,7 +47,64 @@ ECOTRACK_TIMEOUT=20000
 
 ---
 
-## 2. ربط حساب Ecotrack (مهم)
+## 2. الاستضافة على InfinityFree (PHP + MySQL)
+
+نسخة PHP جاهزة للرفع على أي استضافة مشتركة (InfinityFree تستضيف PHP + MySQL فقط — لا تدعم Node.js).
+
+### 2.1 ما ترفعه
+
+ارفع إلى مجلد `htdocs`:
+
+```
+htdocs/
+├── api/                  ← مجلد api كاملاً من المشروع
+├── assets/               ← من داخل public/
+├── index.html, login.html, orders.html … (كل ملفات public/)
+└── .htaccess             ← ملف .htaccess الموجود في جذر المشروع
+```
+
+### 2.2 إعداد قاعدة البيانات
+
+1. من لوحة تحكم InfinityFree ← **MySQL Databases** ← أنشئ قاعدة جديدة.
+   ستظهر لك: **MySQL Host Name** (مثل `sql110.infinityfree.com`) واسم القاعدة
+   (`epiz_XXXXXX_sitycom`) واسم المستخدم وكلمة المرور.
+2. انسخ `api/config.local.example.php` باسم **`api/config.local.php`** واملأ البيانات:
+
+```php
+return [
+    'db' => [
+        'driver' => 'mysql',
+        'host'   => 'sql110.infinityfree.com',
+        'name'   => 'epiz_XXXXXX_sitycom',
+        'user'   => 'epiz_XXXXXX',
+        'pass'   => '••••••••',
+    ],
+    'ecotrack' => [
+        'base_url'  => 'https://votre-societe.ecotrack.dz',
+        'api_token' => 'OijXEUsjLZ…',
+    ],
+];
+```
+
+3. افتح **`https://موقعك/api/setup.php?key=sitycom`** — تنشئ الصفحة الجداول (17 جدولاً)
+   وتدرج البيانات التجريبية، ثم اضغط «فتح لوحة التحكم».
+   (إن أردت الاستيراد اليدوي: `database/mysql.sql` عبر phpMyAdmin.)
+4. سجّل الدخول بـ `admin` / `admin123` و**غيّر كلمة المرور فوراً** من الإعدادات.
+
+### 2.3 متطلبات الاستضافة
+- PHP 7.4 أو أحدث مع `pdo_mysql` و `cURL` و `json` (مفعّلة افتراضياً على InfinityFree).
+- `mod_rewrite` مفعّل (موجود) — وبدونه يعمل الـ API عبر `api/index.php?p=المسار`.
+- لا حاجة لـ Composer أو SSH أو أي اعتمادية خارجية.
+
+### 2.4 الفرق بين الباكندين
+| | Node.js (`server/`) | PHP (`api/`) |
+|---|---|---|
+| الاستخدام | التشغيل المحلي/خادم VPS | الاستضافة المشتركة (InfinityFree) |
+| القاعدة | SQLite (`node:sqlite`) | MySQL (ويمكن SQLite للتجربة) |
+| التشغيل | `npm start` | Apache + PHP |
+| الواجهة والـ API | **نفس الواجهة ونفس مسارات الـ API تماماً** | |
+
+## 3. ربط حساب Ecotrack (مهم)
 
 Ecotrack هي المنصّة التي تعمل عليها عشرات شركات التوصيل الجزائرية (DHD، Conexlog، MSM Go،
 Rocket…). **لكل شركة نطاقها الخاص**، لذلك تحتاج قيمتين من لوحة حسابك:
@@ -69,7 +126,7 @@ Rocket…). **لكل شركة نطاقها الخاص**، لذلك تحتاج ق
 
 ---
 
-## 3. الصفحات (12 صفحة)
+## 4. الصفحات (12 صفحة)
 
 | الصفحة | الملف | الوظيفة |
 |---|---|---|
@@ -88,7 +145,7 @@ Rocket…). **لكل شركة نطاقها الخاص**، لذلك تحتاج ق
 
 ---
 
-## 4. تغطية Ecotrack API (21/21)
+## 5. تغطية Ecotrack API (21/21)
 
 | # | Method | Endpoint Ecotrack | الاستخدام في المشروع | API المحلي |
 |---|---|---|---|---|
@@ -118,7 +175,7 @@ Rocket…). **لكل شركة نطاقها الخاص**، لذلك تحتاج ق
 
 ---
 
-## 5. API المحلي (للتوسعة)
+## 6. API المحلي (للتوسعة)
 
 ```
 POST   /api/auth/login · /logout · /me · /password · /users
@@ -143,10 +200,17 @@ GET    /api/public/status · /api/public/track?tracking=…   (بدون مصاد
 
 ---
 
-## 6. هيكل المشروع
+## 7. هيكل المشروع
 
 ```
 sitycom/
+├── api/                  # ⭐ باكند PHP للاستضافة المشتركة (نفس مسارات الـ API)
+│   ├── index.php         # الموجّه
+│   ├── config.php · config.local.php (غير مرفوع)
+│   ├── setup.php         # صفحة التثبيت
+│   ├── lib/              # db.php (PDO + مخطط) · ecotrack.php · util.php · geo.php
+│   └── routes/           # auth · orders · catalog · eco · misc · helpers
+├── database/mysql.sql    # مخطط MySQL للاستيراد اليدوي
 ├── server/
 │   ├── index.js              # الخادم + المسارات العامة
 │   ├── db.js                 # المخطط + البذرة + الإعدادات
@@ -164,12 +228,13 @@ sitycom/
 │           ├── api.js · ui.js · shell.js
 │           └── pages/*.js
 ├── docs/ECOTRACK.md          # مرجع API الكامل
+├── .htaccess                 # يُنسخ إلى htdocs عند الرفع
 └── data/sitycom.db           # القاعدة (غير مرفوعة)
 ```
 
 ---
 
-## 7. تدفّق العمل المقترح
+## 8. تدفّق العمل المقترح
 
 1. أنشئ المنتجات (أو استوردها من Ecotrack).
 2. من «لوحة الشحن»: أدخل الرابط والتوكن ← اختبار ← مزامنة شاملة.
@@ -180,7 +245,7 @@ sitycom/
 
 ---
 
-## 8. ملاحظات أمنية
+## 9. ملاحظات أمنية
 
 - لا تُرفع ملفات `.env` أو `data/*.db` إلى Git (مستثناة في `.gitignore`).
 - غيّر كلمة المرور الافتراضية `admin123` من الإعدادات بعد أول دخول.
@@ -190,7 +255,7 @@ sitycom/
 
 ---
 
-## 9. استكشاف الأخطاء
+## 10. استكشاف الأخطاء
 
 | المشكلة | السبب والحل |
 |---|---|

@@ -1,4 +1,5 @@
 node_modules/
+api/config.local.php
 .env
 .env.local
 data/*
