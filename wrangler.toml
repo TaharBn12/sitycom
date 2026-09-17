@@ -1,0 +1,33 @@
+#  Sitycom — إعداد النشر على Cloudflare Workers
+#  النشر:  npx wrangler deploy
+#  محليًا: npx wrangler dev
+
+name = "sitycom"
+main = "worker/index.js"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# الواجهة (ملفات public/) تُقدَّم من شبكة Cloudflare مباشرة
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# الطلبات التي لا تطابق ملفًا تمرّ إلى الـWorker (لمسارات /api/*)
+not_found_handling = "none"
+run_worker_first = ["/api/*"]
+
+[observability]
+enabled = true
+
+# ── المتغيرات غير السرّية ────────────────────────────────────────────
+[vars]
+# اتركها فارغة لإنشاء أول حساب من /register.html (يصبح مديرًا تلقائيًا)
+ADMIN_USERNAME = ""
+ADMIN_PASSWORD = ""
+
+# ── الأسرار (لا تُكتب هنا أبدًا) ──────────────────────────────────────
+# اضبطها عبر:
+#   npx wrangler secret put SUPABASE_URL
+#   npx wrangler secret put SUPABASE_ANON_KEY
+#   npx wrangler secret put ECOTRACK_BASE_URL
+#   npx wrangler secret put ECOTRACK_API_TOKEN

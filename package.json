@@ -8,14 +8,21 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "reset-db": "node server/scripts/reset-db.js"
+    "reset-db": "node server/scripts/reset-db.js",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy",
+    "cf:check": "wrangler deploy --dry-run --outdir .wrangler/dry",
+    "cf:secrets": "node scripts/cf-secrets.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
-    "express": "^4.21.2"
+    "express": "^5.2.1"
   },
   "engines": {
     "node": ">=22.5.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.133.0"
+  }
 }

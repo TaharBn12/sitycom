@@ -3,12 +3,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const envPath = path.join(__dirname, '..', '..', '.env');
+let envPath = '';
+try {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  envPath = path.join(__dirname, '..', '..', '.env');
+} catch { /* بيئة بدون نظام ملفات (Cloudflare Workers) */ }
 
 export function loadEnv(file = envPath) {
-  if (!fs.existsSync(file)) return false;
-  const raw = fs.readFileSync(file, 'utf8');
+  if (!file) return false;
+  // على Cloudflare Workers لا يوجد نظام ملفات — تأتي القيم من الأسرار/المتغيرات
+  let raw;
+  try {
+    if (!fs.existsSync(file)) return false;
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return false;
+  }
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -24,4 +34,4 @@ export function loadEnv(file = envPath) {
   return true;
 }
 
-loadEnv();
+try { loadEnv(); } catch { /* بيئة بدون نظام ملفات (Cloudflare Workers) */ }

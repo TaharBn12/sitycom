@@ -44,6 +44,19 @@ npm start              # http://localhost:3000
 - فحص حالة القاعدة: <http://localhost:3000/api/health>
 
 للتطوير مع إعادة التشغيل التلقائي: `npm run dev`
+
+### النشر على Cloudflare Workers ☁️
+
+الموقع متكامل مع Cloudflare: الواجهة عبر Static Assets والخادم (Express + كل مسارات `/api`) عبر `node:http` bridge.
+
+```bash
+npx wrangler login      # أو ضع CLOUDFLARE_API_TOKEN في .env
+npm run cf:secrets      # رفع أسرار Supabase/Ecotrack من .env
+npm run cf:dev          # تجربة محلية في بيئة Workers الحقيقية
+npm run cf:deploy       # النشر
+```
+
+الدليل الكامل: [`docs/CLOUDFLARE.md`](docs/CLOUDFLARE.md)
 لإعادة تهيئة القاعدة (حذف كل الصفوف على Supabase وإعادة البيانات التجريبية): `npm run reset-db`
 
 ### ملف `.env`
