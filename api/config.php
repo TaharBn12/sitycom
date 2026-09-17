@@ -33,7 +33,7 @@ $config = [
     // ── Ecotrack ───────────────────────────────────────────
     'ecotrack' => [
         'base_url'  => ''https://platform.dhd-dz.com/,         // مثال: https://votre-societe.ecotrack.dz
-        'api_token' => '',         // التوكن من حساب Ecotrack
+        'api_token' => 'OijXEUsjLZOUwXVbgXpbAC5Jz5R8enxAg47r478vfGU78hEbZUV1ock8gv2u',         // التوكن من حساب Ecotrack
         'auth_mode' => 'both',     // both | bearer | query
         'timeout'   => 20000,      // ملي ثانية
         'mock'      => null,       // null = تلقائي (mock إذا لم يُضبط الرابط أو التوكن)
