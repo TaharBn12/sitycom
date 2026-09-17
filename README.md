@@ -66,96 +66,8 @@ ECOTRACK_TIMEOUT=20000
 ```
 
 ---
-## 2. الاستضافة على InfinityFree (PHP + MySQL)
 
-نسخة PHP جاهزة للرفع على أي استضافة مشتركة (InfinityFree تستضيف PHP + MySQL فقط — لا تدعم Node.js).
-
-### 2.1 ما ترفعه
-
-ارفع إلى مجلد `htdocs`:
-
-```
-htdocs/
-├── api/                  ← مجلد api كاملاً من المشروع
-├── assets/               ← من داخل public/
-├── index.html, login.html, orders.html … (كل ملفات public/)
-└── .htaccess             ← ملف .htaccess الموجود في جذر المشروع
-```
-
-### 2.2 إعداد قاعدة البيانات
-
-1. من لوحة تحكم InfinityFree ← **MySQL Databases** ← أنشئ قاعدة جديدة.
-   ستظهر لك: **MySQL Host Name** (مثل `sql110.infinityfree.com`) واسم القاعدة
-   (`epiz_XXXXXX_sitycom`) واسم المستخدم وكلمة المرور.
-2. انسخ `api/config.local.example.php` باسم **`api/config.local.php`** واملأ البيانات:
-
-```php
-return [
-    'db' => [
-        'driver' => 'mysql',
-        'host'   => 'sql110.infinityfree.com',
-        'name'   => 'epiz_XXXXXX_sitycom',
-        'user'   => 'epiz_XXXXXX',
-        'pass'   => '••••••••',
-    ],
-    'ecotrack' => [
-        'base_url'  => 'https://votre-societe.ecotrack.dz',
-        'api_token' => 'OijXEUsjLZ…',
-    ],
-];
-```
-
-3. افتح **`https://موقعك/api/setup.php?key=sitycom`** — تنشئ الصفحة الجداول (17 جدولاً)
-   وتدرج البيانات التجريبية، ثم اضغط «فتح لوحة التحكم».
-   (أو استورد `database/mysql.sql` يدوياً عبر phpMyAdmin كما في القسم 2.2.)
-4. سجّل الدخول بـ `admin` / `admin123` و**غيّر كلمة المرور فوراً** من الإعدادات.
-
-### 2.2 الربط خطوة بخطوة عبر phpMyAdmin
-
-**أ) احصل على بيانات الاتصال** (من Client Area ← الحساب ← قسم “MySQL Details”، أو من لوحة التحكم ← MySQL Databases):
-
-| الحقل | المثال | ملاحظة |
-|---|---|---|
-| MySQL Hostname | `sql110.infinityfree.com` | **ليس** `localhost` |
-| MySQL Username | `epiz_12345678` | مستخدم الحساب (يبدأ بـ `epiz_`) |
-| MySQL Password | كلمة مرور **حساب الاستضافة** | تختلف عن كلمة مرور Client Area |
-| Database Name | `epiz_12345678_sitycom` | الاسم الكامل **مع البادئة** |
-
-**ب) أنشئ القاعدة:** لوحة التحكم ← **MySQL Databases** ← اكتب `sitycom` ← Create Database
-(سيظهر الاسم الكامل `epiz_XXXXXX_sitycom` في القائمة).
-
-**ج) افتح phpMyAdmin:** زر **phpMyAdmin** (أو Admin) بجانب القاعدة؛
-سجّل الدخول بنفس اسم المستخدم وكلمة مرور حساب الاستضافة. إن طلب حقل “Server” اكتب `sql110.infinityfree.com`.
-
-**د) استورد المخطط:** من الشريط الأيسر اختر قاعدة `epiz_XXXXXX_sitycom` ← تبويب **Import (استيراد)**
-← **Choose File** ← اختر `database/mysql.sql` ← اترك التنسيق `SQL` وترميز الملف `utf-8` ← **Go (تنفيذ)**.
-يجب أن تظهر رسالة خضراء بأن الاستيراد نجح و**17 جدولاً** في القائمة.
-
-**هـ) تحقّق:** افتح `https://موقعك/api/health` — إن كان كل شيء صحيحاً ستظهر:
-`{"ok":true,"db":"mysql",...}`. وإن كانت هناك مشكلة في البيانات ستظهر رسالة توضّح السبب.
-
-**و) أشهر المشاكل:**
-| الرسالة | السبب والحل |
-|---|---|
-| `Access denied for user` | كلمة المرور هي كلمة مرور **حساب الاستضافة** لا Client Area؛ والمستخدم `epiz_XXXXXX` وليس اسم القاعدة |
-| `Unknown database` | استخدم الاسم الكامل `epiz_XXXXXX_sitycom` كما يظهر في لوحة التحكم |
-| `No tables` بعد الاستيراد | تأكد أنك اخترت القاعدة من الشريط الأيسر قبل الاستيراد |
-| phpMyAdmin لا يفتح | انتظر دقائق بعد إنشاء الحساب، ثم أعد المحاولة من لوحة التحكم |
-
-### 2.3 متطلبات الاستضافة
-- PHP 7.4 أو أحدث مع `pdo_mysql` و `cURL` و `json` (مفعّلة افتراضياً على InfinityFree).
-- `mod_rewrite` مفعّل (موجود) — وبدونه يعمل الـ API عبر `api/index.php?p=المسار`.
-- لا حاجة لـ Composer أو SSH أو أي اعتمادية خارجية.
-
-### 2.4 الفرق بين الباكندين
-| | Node.js (`server/`) | PHP (`api/`) |
-|---|---|---|
-| الاستخدام | التشغيل المحلي/خادم VPS | الاستضافة المشتركة (InfinityFree) |
-| القاعدة | **Supabase (PostgreSQL)** عبر REST | MySQL (ويمكن SQLite للتجربة) |
-| التشغيل | `npm start` | Apache + PHP |
-| الواجهة والـ API | **نفس الواجهة ونفس مسارات الـ API تماماً** | |
-
-## 3. ربط حساب Ecotrack (مهم)
+## 2. ربط حساب Ecotrack (مهم)
 
 Ecotrack هي المنصّة التي تعمل عليها عشرات شركات التوصيل الجزائرية (DHD، Conexlog، MSM Go،
 Rocket…). **لكل شركة نطاقها الخاص**، لذلك تحتاج قيمتين من لوحة حسابك:
@@ -177,7 +89,7 @@ Rocket…). **لكل شركة نطاقها الخاص**، لذلك تحتاج ق
 
 ---
 
-## 4. الصفحات (12 صفحة)
+## 3. الصفحات (12 صفحة)
 
 | الصفحة | الملف | الوظيفة |
 |---|---|---|
@@ -196,7 +108,7 @@ Rocket…). **لكل شركة نطاقها الخاص**، لذلك تحتاج ق
 
 ---
 
-## 5. تغطية Ecotrack API (21/21)
+## 4. تغطية Ecotrack API (21/21)
 
 | # | Method | Endpoint Ecotrack | الاستخدام في المشروع | API المحلي |
 |---|---|---|---|---|
@@ -226,7 +138,7 @@ Rocket…). **لكل شركة نطاقها الخاص**، لذلك تحتاج ق
 
 ---
 
-## 6. API المحلي (للتوسعة)
+## 5. API المحلي (للتوسعة)
 
 ```
 POST   /api/auth/login · /logout · /me · /password · /users
@@ -251,19 +163,12 @@ GET    /api/public/status · /api/public/track?tracking=…   (بدون مصاد
 
 ---
 
-## 7. هيكل المشروع
+## 6. هيكل المشروع
 
 ```
 sitycom/
-├── api/                  # ⭐ باكند PHP للاستضافة المشتركة (نفس مسارات الـ API)
-│   ├── index.php         # الموجّه
-│   ├── config.php · config.local.php (غير مرفوع)
-│   ├── setup.php         # صفحة التثبيت
-│   ├── lib/              # db.php (PDO + مخطط) · ecotrack.php · util.php · geo.php
-│   └── routes/           # auth · orders · catalog · eco · misc · helpers
 ├── database/
-│   ├── supabase.sql         # ⭐ مخطط Supabase (PostgreSQL) — يُنفذ مرة واحدة في SQL Editor
-│   └── mysql.sql            # مخطط MySQL لنسخة PHP (للاستيراد اليدوي)
+│   └── supabase.sql          # ⭐ مخطط Supabase (PostgreSQL) — يُنفذ مرة واحدة في SQL Editor
 ├── server/
 │   ├── index.js              # الخادم + المسارات العامة
 │   ├── db.js                 # طبقة بيانات Supabase (العميل + البذرة + الإعدادات)
@@ -281,13 +186,12 @@ sitycom/
 │           ├── api.js · ui.js · shell.js
 │           └── pages/*.js
 ├── docs/ECOTRACK.md          # مرجع API الكامل
-├── .htaccess                 # يُنسخ إلى htdocs عند الرفع
 └── .env                      # SUPABASE_URL + SUPABASE_ANON_KEY (غير مرفوع)
 ```
 
 ---
 
-## 8. تدفّق العمل المقترح
+## 7. تدفّق العمل المقترح
 
 1. أنشئ المنتجات (أو استوردها من Ecotrack).
 2. من «لوحة الشحن»: أدخل الرابط والتوكن ← اختبار ← مزامنة شاملة.
@@ -298,7 +202,7 @@ sitycom/
 
 ---
 
-## 9. ملاحظات أمنية
+## 8. ملاحظات أمنية
 
 - لا تُرفع ملفات `.env` أو `data/*.db` إلى Git (مستثناة في `.gitignore`).
 - غيّر كلمة المرور الافتراضية `admin123` من الإعدادات بعد أول دخول.
@@ -308,7 +212,7 @@ sitycom/
 
 ---
 
-## 10. استكشاف الأخطاء
+## 9. استكشاف الأخطاء
 
 | المشكلة | السبب والحل |
 |---|---|
