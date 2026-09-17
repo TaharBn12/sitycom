@@ -132,18 +132,21 @@ export async function seedIfEmpty() {
 
   const stamp = now();
 
-  // المستخدم الإداري
-  must(
-    await supabase.from('users').insert({
-      username: process.env.ADMIN_USERNAME || 'admin',
-      name: 'المدير',
-      password_hash: hashPassword(process.env.ADMIN_PASSWORD || 'admin123'),
-      role: 'admin',
-      active: 1,
-      created_at: stamp,
-    }),
-    'seed.user',
-  );
+  // المستخدم الإداري — يُنشأ فقط إذا وُجدت بيانات في .env
+  // وإلا يُنشئ أول مستخدم حسابه بنفسه من صفحة register.html (ويصبح مديرًا)
+  if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
+    must(
+      await supabase.from('users').insert({
+        username: String(process.env.ADMIN_USERNAME).trim().toLowerCase(),
+        name: process.env.ADMIN_NAME || 'المدير',
+        password_hash: hashPassword(process.env.ADMIN_PASSWORD),
+        role: 'admin',
+        active: 1,
+        created_at: stamp,
+      }),
+      'seed.user',
+    );
+  }
 
   // الإعدادات الافتراضية
   const defaults = {

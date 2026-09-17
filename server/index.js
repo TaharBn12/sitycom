@@ -164,8 +164,10 @@ async function boot() {
     console.log('  القاعدة:  Supabase (PostgreSQL)');
     console.log(`  الخادم:   http://localhost:${PORT}`);
     console.log(`  لوحة التحكم: http://localhost:${PORT}/`);
-    if (process.env.ADMIN_USERNAME) {
-      console.log(`  الدخول: ${process.env.ADMIN_USERNAME} / ${process.env.ADMIN_PASSWORD || 'admin123'}`);
+    if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
+      console.log(`  الدخول: ${process.env.ADMIN_USERNAME}`);
+    } else {
+      console.log(`  إنشاء حساب: http://localhost:${PORT}/register.html`);
     }
     try {
       const cfg = await ecotrack.getConfig();

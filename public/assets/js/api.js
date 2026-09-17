@@ -90,6 +90,7 @@ export const api = {
 
   // المصادقة
   login: (username, password) => request('POST', 'api/auth/login', { username, password }),
+  register: (payload) => request('POST', 'api/auth/register', payload),
   logout: () => request('POST', 'api/auth/logout', {}).catch(() => null),
   me: () => request('GET', 'api/auth/me'),
 

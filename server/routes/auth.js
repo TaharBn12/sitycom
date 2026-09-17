@@ -31,6 +31,54 @@ router.post('/login', asyncRoute(async (req, res) => {
   });
 }));
 
+// ── إنشاء حساب جديد (عمومي) ──────────────────────────────────
+router.post('/register', asyncRoute(async (req, res) => {
+  const { username, name, password, confirm_password } = req.body || {};
+  const uname = String(username || '').trim().toLowerCase();
+
+  if (!uname || !password) throw new HttpError(400, 'اسم المستخدم وكلمة المرور مطلوبان');
+  if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(uname)) {
+    throw new HttpError(400, 'اسم المستخدم: 3-32 حرفًا لاتينيًا أو رقمًا أو (_ . -)');
+  }
+  if (String(password).length < 6) throw new HttpError(400, 'كلمة المرور يجب أن تكون 6 أحرف على الأقل');
+  if (confirm_password !== undefined && String(confirm_password) !== String(password)) {
+    throw new HttpError(400, 'كلمتا المرور غير متطابقتين');
+  }
+
+  const exists = must(
+    await supabase.from('users').select('id').eq('username', uname).maybeSingle(),
+    'register.exists',
+  );
+  if (exists) throw new HttpError(409, 'اسم المستخدم مستعمل بالفعل');
+
+  // أول مستخدم في النظام يصبح مديرًا، والبقية موظفين
+  const { count } = await supabase.from('users').select('id', { count: 'exact', head: true });
+  const role = Number(count || 0) === 0 ? 'admin' : 'staff';
+
+  const row = must(
+    await supabase.from('users').insert({
+      username: uname,
+      name: String(name || uname).trim(),
+      password_hash: hashPassword(password),
+      role,
+      active: 1,
+      created_at: now(),
+    }).select('id, username, name, role').single(),
+    'register.create',
+  );
+
+  const session = await createSession(row.id);
+  must(await supabase.from('users').update({ last_login: now() }).eq('id', row.id), 'register.touch');
+  await logActivity(row.id, row.username, 'user.register', 'user', row.id, '', 1);
+
+  res.json({
+    ok: true,
+    token: session.token,
+    expires_at: session.expires_at,
+    user: { id: row.id, username: row.username, name: row.name, role: row.role },
+  });
+}));
+
 router.post('/logout', asyncRoute(async (req, res) => {
   if (req.token) {
     const u = req.user;

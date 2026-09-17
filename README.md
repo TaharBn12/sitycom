@@ -39,7 +39,8 @@ npm start              # http://localhost:3000
 
 - لوحة التحكم: <http://localhost:3000/> (أو `/index.html`)
 - صفحة تتبّع الزبون (عمومية بدون دخول): <http://localhost:3000/track.html>
-- بيانات الدخول التجريبية: `admin` / `admin123`
+- إنشاء أول حساب: <http://localhost:3000/register.html> (أول حساب يصبح مديرًا تلقائيًا)
+- تسجيل الدخول: <http://localhost:3000/login.html>
 - فحص حالة القاعدة: <http://localhost:3000/api/health>
 
 للتطوير مع إعادة التشغيل التلقائي: `npm run dev`
@@ -55,8 +56,8 @@ SUPABASE_URL=https://xxxxxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIs...
 
 PORT=3000
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
+ADMIN_USERNAME=            # اختياري — أو أنشئ الحساب من /register.html
+ADMIN_PASSWORD=
 
 ECOTRACK_BASE_URL=          # مثال: https://votre-societe.ecotrack.dz
 ECOTRACK_API_TOKEN=         # التوكن من حساب Ecotrack
@@ -205,7 +206,8 @@ sitycom/
 ## 8. ملاحظات أمنية
 
 - لا تُرفع ملفات `.env` أو `data/*.db` إلى Git (مستثناة في `.gitignore`).
-- غيّر كلمة المرور الافتراضية `admin123` من الإعدادات بعد أول دخول.
+- لا توجد بيانات دخول افتراضية: يُنشأ أول حساب من `/register.html` ويصبح مديرًا.
+- اختر كلمة مرور قوية (6 أحرف كحد أدنى) ويمكن تغييرها من الإعدادات.
 - التوكن يُخزَّن في قاعدة البيانات محلياً ويُعرض مقنّعاً في الواجهة
   (`OijXEU••••••••k8gv2u`). لا يُرسل إلى المتصفح كاملاً.
 - كل طلبات Ecotrack تمرّ عبر الخادم (لا CORS ولا كشف للتوكن في المتصفح).
