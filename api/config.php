@@ -16,9 +16,9 @@ $config = [
         'driver' => 'mysql',
         'host'   => 'sql110.infinityfree.com',
         'port'   => 3306,
-        'name'   => '',            // مثال: epiz_12345678_sitycom
-        'user'   => '',            // مثال: epiz_12345678
-        'pass'   => '',
+        'name'   => 'if0_40731199_sitycom',            // مثال: epiz_12345678_sitycom
+        'user'   => 'if0_40731199',            // مثال: epiz_12345678
+        'pass'   => 'fSxlNjgoak',
         'charset' => 'utf8mb4',
         'file'   => __DIR__ . '/../data/sitycom.db', // عند driver = sqlite
     ],
@@ -32,7 +32,7 @@ $config = [
 
     // ── Ecotrack ───────────────────────────────────────────
     'ecotrack' => [
-        'base_url'  => '',         // مثال: https://votre-societe.ecotrack.dz
+        'base_url'  => ''https://platform.dhd-dz.com/,         // مثال: https://votre-societe.ecotrack.dz
         'api_token' => '',         // التوكن من حساب Ecotrack
         'auth_mode' => 'both',     // both | bearer | query
         'timeout'   => 20000,      // ملي ثانية
