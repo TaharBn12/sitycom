@@ -81,7 +81,7 @@ export async function getConfig() {
   return {
     baseUrl,
     token,
-    authMode: cfg.auth_mode || process.env.ECOTRACK_AUTH_MODE || 'both', // both | bearer | query
+    authMode: cfg.auth_mode || process.env.ECOTRACK_AUTH_MODE || 'bearer', // bearer | query | both
     timeout: num(cfg.timeout || process.env.ECOTRACK_TIMEOUT, 20000),
     // وضع تجريبي تلقائي إذا لم يُضبط الرابط أو التوكن
     mock: mockEnv || cfg.mock === true || !configured,
@@ -644,31 +644,50 @@ export function normalizeFees(feesResponse) {
 }
 
 /** يحوّل رد get/communes (كائن مرقّم) إلى مصفوفة */
-export function normalizeCommunes(response) {
-  if (Array.isArray(response)) {
-    return response.map((c) => ({
-      wilaya_id: num(c.wilaya_id, 0),
-      name: c.nom || c.name || '',
-      code_postal: String(c.code_postal ?? ''),
-      has_stop_desk: bool01(c.has_stop_desk),
-    }));
+export function normalizeCommunes(response, fallbackWilayaId = 0) {
+  const map = (c) => ({
+    wilaya_id: num(c.wilaya_id ?? c.code_wilaya ?? fallbackWilayaId, 0) || num(fallbackWilayaId, 0),
+    name: c.nom || c.name || c.commune || c.nom_commune || c.libelle || '',
+    code_postal: String(c.code_postal ?? c.cp ?? ''),
+    has_stop_desk: bool01(c.has_stop_desk ?? c.stop_desk ?? c.hasStopDesk),
+  });
+  let list = [];
+  if (Array.isArray(response)) list = response;
+  else if (Array.isArray(response?.data)) list = response.data;
+  else if (Array.isArray(response?.communes)) list = response.communes;
+  else {
+    const obj = (response?.data && typeof response.data === 'object') ? response.data : response;
+    list = Object.entries(obj || {})
+      .filter(([k]) => !['success', 'message', 'status', 'error'].includes(k))
+      .map(([key, val]) => ((val && typeof val === 'object') ? val : { nom: val, wilaya_id: fallbackWilayaId, _k: key }));
   }
-  const obj = response?.data && !Array.isArray(response.data) ? response.data : response;
-  return Object.values(obj || {}).map((c) => ({
-    wilaya_id: num(c.wilaya_id, 0),
-    name: c.nom || c.name || '',
-    code_postal: String(c.code_postal ?? ''),
-    has_stop_desk: bool01(c.has_stop_desk),
-  })).filter((c) => c.name);
+  return list.map(map).filter((c) => c.name);
 }
 
 /** يحوّل رد get/wilayas */
 export function normalizeWilayas(response) {
-  const list = Array.isArray(response) ? response : response?.data || [];
+  // Ecotrack قد يعيد: مصفوفة | {data:[...]} | كائن مرقّم {"1":{...}} | {"1":"Adrar"}
+  let list = [];
+  if (Array.isArray(response)) list = response;
+  else if (Array.isArray(response?.data)) list = response.data;
+  else if (Array.isArray(response?.wilayas)) list = response.wilayas;
+  else {
+    const obj = (response?.data && typeof response.data === 'object') ? response.data : response;
+    if (obj && typeof obj === 'object') {
+      list = Object.entries(obj)
+        .filter(([k]) => !['success', 'message', 'status', 'error'].includes(k))
+        .map(([key, val]) => (
+          (val && typeof val === 'object')
+            ? { wilaya_id: val.wilaya_id ?? val.id ?? key, ...val }
+            : { wilaya_id: key, wilaya_name: val }
+        ));
+    }
+  }
   return list.map((w) => ({
-    wilaya_id: num(w.wilaya_id ?? w.id, 0),
-    name: w.wilaya_name || w.name || '',
-  })).filter((w) => w.wilaya_id);
+    wilaya_id: num(w.wilaya_id ?? w.id ?? w.code_wilaya ?? w.code, 0),
+    name: w.wilaya_name || w.name || w.nom || w.name_fr || w.libelle || '',
+    name_ar: w.wilaya_name_ar || w.name_ar || w.nom_ar || '',
+  })).filter((w) => w.wilaya_id > 0 && w.wilaya_id <= 58);
 }
 
 export { mockTracking };

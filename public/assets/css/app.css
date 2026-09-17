@@ -369,3 +369,11 @@ table.table .actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content
 }
 .stepper .step.done { background: var(--success-soft); border-color: #bbf7d0; color: #15803d; font-weight: 700; }
 .stepper .step.current { background: var(--primary-soft); border-color: #bfdbfe; color: var(--primary-dark); font-weight: 700; }
+
+/* ── كتلة كود (نتائج التشخيص) ─────────────────────────── */
+pre.code {
+  background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  direction: ltr; text-align: left; overflow-x: auto; white-space: pre-wrap;
+  word-break: break-all; max-height: 260px; margin: 6px 0;
+}

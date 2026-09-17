@@ -48,7 +48,7 @@ content.appendChild(connCard);
 const baseUrl = el('input', { type: 'text', placeholder: t('shipping.base_url_hint') });
 const token = el('input', { type: 'text', placeholder: 'OijXEU…' });
 const authMode = el('select');
-[['both', 'Bearer + query'], ['bearer', 'Bearer'], ['query', 'query param']].forEach(([v, l]) => authMode.appendChild(el('option', { value: v, text: l })));
+[['bearer', 'Bearer (موصى به)'], ['both', 'Bearer + query'], ['query', 'query param']].forEach(([v, l]) => authMode.appendChild(el('option', { value: v, text: l })));
 const timeout = el('input', { type: 'number', value: '20000' });
 const mockBox = el('input', { type: 'checkbox' });
 const validationBox = el('div', { class: 'mt-2' });
@@ -67,8 +67,57 @@ connBody.appendChild(el('div', { class: 'btn-group' }, [
   el('button', { class: 'btn btn-sm', text: t('shipping.test'), onclick: () => testConnection() }),
   el('button', { class: 'btn btn-sm', text: t('shipping.rate_limit'), onclick: () => showRateLimit() }),
   el('button', { class: 'btn btn-sm', text: t('common.refresh'), onclick: () => loadStatus() }),
+  el('button', { class: 'btn btn-sm', text: t('shipping.diagnose'), onclick: () => runDiagnose() }),
 ]));
 connBody.appendChild(validationBox);
+
+async function runDiagnose() {
+  const box = el('div', { class: 'card-body' }, [el('span', { class: 'spinner' })]);
+  const close = modal({ title: t('shipping.diagnose'), body: box, size: 'lg' });
+  try {
+    const r = await api.get('api/ecotrack/diagnose');
+    const d = r.diagnose;
+    clear(box);
+    box.appendChild(el('h3', { text: t('shipping.connection') }));
+    const c = d.config;
+    box.appendChild(el('pre', { class: 'code', text:
+      `base_url:   ${c.base_url}\n`
+      + `token:      ${c.has_token ? '✔ موجود (' + c.token_length + ' حرف)' : '✘ غير موجود'}\n`
+      + `auth_mode:  ${c.auth_mode}\n`
+      + `mock:       ${c.mock ? '⚠️ وضع تجريبي' : '✔ بيانات حقيقية'}` }));
+    if (d.hint) box.appendChild(el('div', { class: 'alert alert-warn', text: d.hint }));
+
+    box.appendChild(el('h3', { class: 'mt-2', text: 'نتائج الاختبارات' }));
+    for (const [name, v] of Object.entries(d.tests)) {
+      const okBadge = el('span', { class: `badge ${v.ok ? 'done' : 'bad'}`, text: v.ok ? 'OK' : 'FAIL' });
+      const head = el('div', { class: 'row-between mt-2' }, [el('strong', { text: name }), okBadge]);
+      box.appendChild(head);
+      if (v.ok) {
+        const info = [];
+        if (v.mock) info.push('⚠️ رد تجريبي (mock)');
+        info.push(`نوع الرد: ${v.raw_type}`);
+        if (v.raw_keys) info.push(`المفاتيح: ${v.raw_keys.join(', ')}`);
+        if (v.normalized_count !== undefined) {
+          info.push(`عدد العناصر بعد التحويل: ${v.normalized_count}`);
+          if (v.normalized_count === 0) info.push('❗ التحويل أعاد 0 — صيغة الرد غير متوقّعة');
+        }
+        box.appendChild(el('div', { class: 'muted', text: info.join(' | ') }));
+        box.appendChild(el('pre', { class: 'code', text: v.sample }));
+      } else {
+        box.appendChild(el('div', { class: 'alert alert-danger', text: `${v.error}${v.status ? ' (HTTP ' + v.status + ')' : ''}` }));
+      }
+    }
+    const btn = el('button', { class: 'btn btn-sm mt-2', text: t('common.copy'), onclick: () => {
+      navigator.clipboard.writeText(JSON.stringify(d, null, 2));
+      toast(t('common.copied'), 'success');
+    } });
+    box.appendChild(btn);
+  } catch (err) {
+    clear(box);
+    box.appendChild(el('div', { class: 'alert alert-danger', text: err.message }));
+  }
+  return close;
+}
 
 /* ══════════════════════ المزامنة ══════════════════════ */
 const syncCard = el('div', { class: 'card' }, [

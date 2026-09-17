@@ -15,6 +15,55 @@ function mask(token) {
 }
 
 // ══════════════════════ حالة الربط ══════════════════════
+/** تشخيص الربط: يعرض الرد الخام من Ecotrack لتحديد سبب فشل الولايات */
+router.get('/diagnose', requireAuth, asyncRoute(async (_req, res) => {
+  const cfg = await ec.getConfig();
+  const out = {
+    config: {
+      base_url: cfg.baseUrl || '(فارغ)',
+      has_token: Boolean(cfg.token),
+      token_length: cfg.token ? cfg.token.length : 0,
+      auth_mode: cfg.authMode,
+      mock: cfg.mock,
+      configured: cfg.configured,
+    },
+    hint: cfg.mock
+      ? 'الوضع تجريبي: أدخل الرابط الأساسي والتوكن من «الإعدادات ← التوصيل» لتفعيل البيانات الحقيقية.'
+      : null,
+    tests: {},
+  };
+
+  const probe = async (name, fn, normalize) => {
+    try {
+      const r = await fn();
+      const raw = r.data;
+      const entry = {
+        ok: true,
+        mock: Boolean(r.mock),
+        raw_type: Array.isArray(raw) ? 'array' : typeof raw,
+        raw_keys: (raw && typeof raw === 'object' && !Array.isArray(raw)) ? Object.keys(raw).slice(0, 12) : null,
+        sample: JSON.stringify(raw).slice(0, 500),
+      };
+      if (normalize) {
+        const list = normalize(raw);
+        entry.normalized_count = list.length;
+        entry.normalized_sample = list.slice(0, 3);
+      }
+      out.tests[name] = entry;
+    } catch (err) {
+      out.tests[name] = { ok: false, error: err.message, code: err.code ?? null, status: err.status ?? null };
+    }
+  };
+
+  await probe('validate_token', () => ec.validateToken());
+  await probe('wilayas', () => ec.getWilayas(), ec.normalizeWilayas);
+  await probe('communes_w16', () => ec.getCommunes(16), (d) => ec.normalizeCommunes(d, 16));
+  await probe('fees', () => ec.getFees(), ec.normalizeFees);
+  await probe('desks', () => ec.getDesks());
+
+  res.json({ ok: true, diagnose: out });
+}));
+
 router.get('/status', requireAuth, asyncRoute(async (_req, res) => {
   const cfg = await ec.getConfig();
   let validation = null;
@@ -246,7 +295,7 @@ async function endJob(id, status, message = '', count = 0) {
 }
 
 /** 17. مزامنة الولايات */
-router.post('/sync/wilayas', requireAuth, asyncRoute(async (req, res) => {
+const syncWilayasHandler = asyncRoute(async (req, res) => {
   const job = await startJob('wilayas');
   try {
     const r = await ec.getWilayas();
@@ -280,10 +329,10 @@ router.post('/sync/wilayas', requireAuth, asyncRoute(async (req, res) => {
     await endJob(job, 'failed', err.message);
     res.status(422).json({ ok: false, error: err.message });
   }
-}));
+});
 
 /** 19. مزامنة البلديات */
-router.post('/sync/communes', requireAuth, asyncRoute(async (req, res) => {
+const syncCommunesHandler = asyncRoute(async (req, res) => {
   const job = await startJob('communes');
   try {
     const wilayaId = req.body?.wilaya_id ? int(req.body.wilaya_id) : null;
@@ -302,7 +351,7 @@ router.post('/sync/communes', requireAuth, asyncRoute(async (req, res) => {
     for (const wid of targets) {
       try {
         const r = await ec.getCommunes(wid);
-        const list = ec.normalizeCommunes(r.data);
+        const list = ec.normalizeCommunes(r.data, wid);
         if (!list.length) continue;
         must(await supabase.from('communes').delete().eq('wilaya_id', wid), 'sync.communes.clear');
         for (const part of chunk(list.map((c) => ({
@@ -332,10 +381,10 @@ router.post('/sync/communes', requireAuth, asyncRoute(async (req, res) => {
     await endJob(job, 'failed', err.message);
     res.status(422).json({ ok: false, error: err.message });
   }
-}));
+});
 
 /** 18. مزامنة المكاتب */
-router.post('/sync/desks', requireAuth, asyncRoute(async (req, res) => {
+const syncDesksHandler = asyncRoute(async (req, res) => {
   const job = await startJob('desks');
   try {
     const r = await ec.getDesks();
@@ -383,10 +432,10 @@ router.post('/sync/desks', requireAuth, asyncRoute(async (req, res) => {
     await endJob(job, 'failed', err.message);
     res.status(422).json({ ok: false, error: err.message });
   }
-}));
+});
 
 /** 20. مزامنة الأسعار */
-router.post('/sync/fees', requireAuth, asyncRoute(async (req, res) => {
+const syncFeesHandler = asyncRoute(async (req, res) => {
   const job = await startJob('fees');
   try {
     const r = await ec.getFees();
@@ -418,10 +467,10 @@ router.post('/sync/fees', requireAuth, asyncRoute(async (req, res) => {
     await endJob(job, 'failed', err.message);
     res.status(422).json({ ok: false, error: err.message });
   }
-}));
+});
 
 /** 21. مزامنة منتجات Ecotrack */
-router.post('/sync/products', requireAuth, asyncRoute(async (req, res) => {
+const syncProductsHandler = asyncRoute(async (req, res) => {
   const job = await startJob('products');
   try {
     const maxPages = Math.min(20, int(req.body?.pages, 3));
@@ -456,38 +505,45 @@ router.post('/sync/products', requireAuth, asyncRoute(async (req, res) => {
     await endJob(job, 'failed', err.message);
     res.status(422).json({ ok: false, error: err.message });
   }
-}));
+});
 
 /** مزامنة شاملة */
+// تسجيل مسارات المزامنة
+router.post('/sync/wilayas', requireAuth, syncWilayasHandler);
+router.post('/sync/communes', requireAuth, syncCommunesHandler);
+router.post('/sync/desks', requireAuth, syncDesksHandler);
+router.post('/sync/fees', requireAuth, syncFeesHandler);
+router.post('/sync/products', requireAuth, syncProductsHandler);
+
 router.post('/sync/all', requireAuth, asyncRoute(async (req, res) => {
   const report = {};
   const results = {};
-  for (const [key, fn] of Object.entries({
-    wilayas: () => ec.getWilayas(),
-    desks: () => ec.getDesks(),
-    fees: () => ec.getFees(),
-  })) {
+  // تنفيذ المزامنة داخليًا (بدون self-fetch — لا يعمل على Cloudflare Workers)
+  const run = async (name, handler, body) => {
+    let payload = null;
+    const sub = Object.create(req);
+    sub.body = body || {};
+    sub.params = {};
+    sub.query = {};
+    const fakeRes = {
+      statusCode: 200,
+      status(c) { this.statusCode = c; return this; },
+      json(d) { payload = d; return this; },
+    };
     try {
-      const r = await fn();
-      results[key] = { ok: true, mock: Boolean(r.mock) };
+      await handler(sub, fakeRes, (e) => { if (e) throw e; });
     } catch (err) {
-      results[key] = { ok: false, error: err.message };
+      payload = { ok: false, error: err.message };
     }
+    results[name] = payload || { ok: false, error: 'لا استجابة' };
     await sleep(150);
-  }
-  // تنفيذ المزامنة الفعلية عبر نفس المنطق
-  const sync = async (routePath, body) => {
-    await fetch(`${req.protocol}://${req.get('host')}/api/ecotrack${routePath}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${req.token}` },
-      body: JSON.stringify(body || {}),
-    }).catch(() => null);
   };
-  await sync('/sync/wilayas');
-  await sync('/sync/desks');
-  await sync('/sync/fees');
-  if (req.body?.communes) await sync('/sync/communes');
-  if (req.body?.products) await sync('/sync/products');
+
+  await run('wilayas', syncWilayasHandler);
+  await run('desks', syncDesksHandler);
+  await run('fees', syncFeesHandler);
+  if (req.body?.communes) await run('communes', syncCommunesHandler, { wilaya_id: req.body.wilaya_id });
+  if (req.body?.products) await run('products', syncProductsHandler, { pages: req.body.pages });
   report.results = results;
   await logActivity(req.user.id, req.user.username, 'sync.all', 'ecotrack', '', '', 1);
   res.json({ ok: true, report });

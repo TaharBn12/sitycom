@@ -6,11 +6,15 @@ import { requireAuth } from '../lib/auth.js';
 const router = express.Router();
 
 /** الولايات المحفوظة محلياً (بعد المزامنة) */
-router.get('/wilayas', requireAuth, asyncRoute(async (_req, res) => {
-  const wilayas = must(
-    await supabase.from('wilayas').select('*').eq('active', 1).order('wilaya_id'),
-    'geo.wilayas',
-  );
+router.get('/wilayas', requireAuth, asyncRoute(async (req, res) => {
+  const all = req.query.all === '1';
+  let wilayas = all
+    ? must(await supabase.from('wilayas').select('*').order('wilaya_id'), 'geo.wilayas')
+    : must(await supabase.from('wilayas').select('*').eq('active', 1).order('wilaya_id'), 'geo.wilayas');
+  // احتياط: إذا لم تُرجع المزامنة شيئًا، أعد كل الولايات بدل قائمة فارغة
+  if (!wilayas.length) {
+    wilayas = must(await supabase.from('wilayas').select('*').order('wilaya_id'), 'geo.wilayas.all');
+  }
   res.json({ ok: true, wilayas });
 }));
 
@@ -83,9 +87,13 @@ router.get('/bootstrap', requireAuth, asyncRoute(async (_req, res) => {
     supabase.from('desks').select('id, name, wilaya, commune, address, phone').order('name'),
     supabase.from('shipping_fees').select('*').order('wilaya_id'),
   ]);
+  let wList = must(wilayas, 'geo.bootstrap.wilayas');
+  if (!wList.length) {
+    wList = must(await supabase.from('wilayas').select('*').order('wilaya_id'), 'geo.bootstrap.wilayas.all');
+  }
   res.json({
     ok: true,
-    wilayas: must(wilayas, 'geo.bootstrap.wilayas'),
+    wilayas: wList,
     communes: communes.slice(0, 5 * REST_PAGE),
     desks: must(desks, 'geo.bootstrap.desks'),
     fees: must(fees, 'geo.bootstrap.fees'),
