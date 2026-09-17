@@ -19,18 +19,28 @@ jobs:
       - name: تثبيت الاعتماديات
         run: npm ci
 
+      # يرفع فقط الأسرار المعرّفة فعلًا (Ecotrack اختياري — يُضبط من لوحة التحكم)
+      - name: تحديد الأسرار المتوفّرة
+        id: sec
+        run: |
+          list=""
+          [ -n "${{ secrets.SUPABASE_URL }}" ]       && list="${list}SUPABASE_URL"$'\n'
+          [ -n "${{ secrets.SUPABASE_ANON_KEY }}" ]  && list="${list}SUPABASE_ANON_KEY"$'\n'
+          [ -n "${{ secrets.ECOTRACK_BASE_URL }}" ]  && list="${list}ECOTRACK_BASE_URL"$'\n'
+          [ -n "${{ secrets.ECOTRACK_API_TOKEN }}" ] && list="${list}ECOTRACK_API_TOKEN"$'\n'
+          {
+            echo "list<<EOF"
+            printf '%s' "$list"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: النشر ورفع الأسرار
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
-          # تُرفع كأسرار للـWorker (يجب تعريفها في GitHub Secrets)
-          secrets: |
-            SUPABASE_URL
-            SUPABASE_ANON_KEY
-            ECOTRACK_BASE_URL
-            ECOTRACK_API_TOKEN
+          secrets: ${{ steps.sec.outputs.list }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
