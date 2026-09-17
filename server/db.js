@@ -1,280 +1,74 @@
-import { DatabaseSync } from 'node:sqlite';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+// ════════════════════════════════════════════════════════════════════
+//  طبقة البيانات — Supabase (PostgreSQL عبر REST)
+//  المتطلبات:
+//    1) تنفيذ  database/supabase.sql  مرة واحدة في Supabase ← SQL Editor
+//    2) ضبط SUPABASE_URL و SUPABASE_ANON_KEY في ملف .env
+// ════════════════════════════════════════════════════════════════════
+import { createClient } from '@supabase/supabase-js';
 import { WILAYAS, COMMUNES, mockFees } from './data/geo.js';
 import { hashPassword, now, uid } from './lib/util.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const DATA_DIR = path.join(__dirname, '..', 'data');
-export const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'sitycom.db');
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-
-export const db = new DatabaseSync(DB_PATH);
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec('PRAGMA foreign_keys = ON;');
-
-// ── أدوات استعلام بسيطة ───────────────────────────────────────
-export function run(sql, params = []) {
-  return db.prepare(sql).run(...params);
-}
-export function get(sql, params = []) {
-  return db.prepare(sql).get(...params);
-}
-export function all(sql, params = []) {
-  return db.prepare(sql).all(...params);
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error('─'.repeat(60));
+  console.error('  ⚠️  إعدادات Supabase ناقصة');
+  console.error('  أضف في ملف .env:');
+  console.error('    SUPABASE_URL=https://xxxxxxxx.supabase.co');
+  console.error('    SUPABASE_ANON_KEY=eyJ...');
+  console.error('─'.repeat(60));
+  process.exit(1);
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
-  name TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'admin',
-  active INTEGER NOT NULL DEFAULT 1,
-  last_login TEXT,
-  created_at TEXT NOT NULL
-);
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
-CREATE TABLE IF NOT EXISTS sessions (
-  token TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL,
-  expires_at TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+/** PostgREST لا يعيد أكثر من 1000 سطر في الطلب الواحد */
+export const REST_PAGE = 1000;
 
-CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY,
-  value TEXT,
-  updated_at TEXT
-);
+/** يفحص نتيجة Supabase ويرمي خطأ واضحاً عند الفشل */
+export function must(res, what = '') {
+  if (res.error) {
+    const msg = res.error.message || String(res.error);
+    const missingTable = res.error.code === '42P01' || res.error.code === 'PGRST205'
+      || /does not exist|schema cache/i.test(msg);
+    const network = /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network/i.test(msg);
+    const hint = missingTable
+      ? '\n  ↳ نفّذ ملف  database/supabase.sql  في Supabase ← SQL Editor ثم أعد المحاولة.'
+      : network
+        ? '\n  ↳ تعذّر الوصول إلى Supabase — تحقّق من الاتصال بالإنترنت ومن صحة SUPABASE_URL في ملف .env'
+        : '';
+    throw new Error(`قاعدة البيانات${what ? ` (${what})` : ''}: ${msg}${hint}`);
+  }
+  return res.data;
+}
 
-CREATE TABLE IF NOT EXISTS categories (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name_ar TEXT NOT NULL,
-  name_fr TEXT NOT NULL DEFAULT '',
-  name_en TEXT NOT NULL DEFAULT '',
-  slug TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL
-);
+/** يقطّع مصفوفة كبيرة إلى دفعات صغيرة للإدراج الجماعي */
+export function chunk(arr, size = 400) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
-CREATE TABLE IF NOT EXISTS products (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  sku TEXT,
-  name_ar TEXT NOT NULL,
-  name_fr TEXT NOT NULL DEFAULT '',
-  name_en TEXT NOT NULL DEFAULT '',
-  description TEXT DEFAULT '',
-  price REAL NOT NULL DEFAULT 0,
-  cost REAL NOT NULL DEFAULT 0,
-  stock INTEGER NOT NULL DEFAULT 0,
-  category_id INTEGER,
-  image_url TEXT DEFAULT '',
-  weight REAL DEFAULT 0,
-  fragile INTEGER NOT NULL DEFAULT 0,
-  ecotrack_reference TEXT DEFAULT '',
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS customers (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  phone TEXT NOT NULL,
-  phone2 TEXT DEFAULT '',
-  email TEXT DEFAULT '',
-  wilaya_id INTEGER,
-  commune TEXT DEFAULT '',
-  address TEXT DEFAULT '',
-  notes TEXT DEFAULT '',
-  created_at TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
-
-CREATE TABLE IF NOT EXISTS orders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_number TEXT UNIQUE NOT NULL,
-  customer_id INTEGER,
-  customer_name TEXT NOT NULL,
-  phone TEXT NOT NULL,
-  phone2 TEXT DEFAULT '',
-  wilaya_id INTEGER,
-  wilaya_name TEXT DEFAULT '',
-  commune TEXT DEFAULT '',
-  address TEXT DEFAULT '',
-  stop_desk INTEGER NOT NULL DEFAULT 0,
-  desk_code TEXT DEFAULT '',
-  desk_name TEXT DEFAULT '',
-  subtotal REAL NOT NULL DEFAULT 0,
-  shipping_fee REAL NOT NULL DEFAULT 0,
-  discount REAL NOT NULL DEFAULT 0,
-  total REAL NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'draft',
-  payment_status TEXT NOT NULL DEFAULT 'unpaid',
-  source TEXT NOT NULL DEFAULT 'admin',
-  notes TEXT DEFAULT '',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS order_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_id INTEGER NOT NULL,
-  product_id INTEGER,
-  name TEXT NOT NULL,
-  sku TEXT DEFAULT '',
-  qty INTEGER NOT NULL DEFAULT 1,
-  unit_price REAL NOT NULL DEFAULT 0,
-  line_total REAL NOT NULL DEFAULT 0,
-  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);
-
--- حقول الربط مع Ecotrack (سطر واحد لكل طلبية)
-CREATE TABLE IF NOT EXISTS shipments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_id INTEGER UNIQUE NOT NULL,
-  tracking TEXT,
-  reference TEXT,
-  type INTEGER NOT NULL DEFAULT 1,           -- 1 Livraison 2 Échange 3 Pickup 4 Recouvrement
-  stop_desk INTEGER NOT NULL DEFAULT 0,
-  produit TEXT DEFAULT '',
-  quantite TEXT DEFAULT '',
-  stock INTEGER NOT NULL DEFAULT 0,
-  produit_a_recuperer TEXT DEFAULT '',
-  boutique TEXT DEFAULT '',
-  remarque TEXT DEFAULT '',
-  weight REAL DEFAULT 0,
-  fragile INTEGER NOT NULL DEFAULT 0,
-  gps_link TEXT DEFAULT '',
-  ask_collection INTEGER NOT NULL DEFAULT 0,
-  ecotrack_status TEXT DEFAULT '',
-  delivery_fee REAL DEFAULT 0,
-  return_fee REAL DEFAULT 0,
-  last_activity TEXT DEFAULT '',
-  last_activity_at TEXT DEFAULT '',
-  pushed_at TEXT,
-  validated_at TEXT,
-  return_asked_at TEXT,
-  synced_at TEXT,
-  raw TEXT,
-  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_shipments_tracking ON shipments(tracking);
-
-CREATE TABLE IF NOT EXISTS order_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_id INTEGER,
-  tracking TEXT,
-  status TEXT,
-  activity TEXT,
-  station TEXT DEFAULT '',
-  driver TEXT DEFAULT '',
-  details TEXT DEFAULT '',
-  event_date TEXT,
-  event_time TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_events_order ON order_events(order_id);
-CREATE INDEX IF NOT EXISTS idx_events_tracking ON order_events(tracking);
-
-CREATE TABLE IF NOT EXISTS wilayas (
-  wilaya_id INTEGER PRIMARY KEY,
-  name_fr TEXT NOT NULL,
-  name_ar TEXT NOT NULL DEFAULT '',
-  active INTEGER NOT NULL DEFAULT 1,
-  has_stop_desk INTEGER NOT NULL DEFAULT 0,
-  synced_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS communes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  wilaya_id INTEGER NOT NULL,
-  name TEXT NOT NULL,
-  code_postal TEXT DEFAULT '',
-  has_stop_desk INTEGER NOT NULL DEFAULT 0,
-  UNIQUE(wilaya_id, name)
-);
-CREATE INDEX IF NOT EXISTS idx_communes_wilaya ON communes(wilaya_id);
-
-CREATE TABLE IF NOT EXISTS desks (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  hub_id TEXT,
-  name TEXT NOT NULL,
-  wilaya TEXT DEFAULT '',
-  commune TEXT DEFAULT '',
-  address TEXT DEFAULT '',
-  phone TEXT DEFAULT '',
-  phone2 TEXT DEFAULT '',
-  email TEXT DEFAULT '',
-  map TEXT DEFAULT '',
-  hours TEXT DEFAULT '',
-  is_my_desk INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS shipping_fees (
-  wilaya_id INTEGER PRIMARY KEY,
-  wilaya_name TEXT DEFAULT '',
-  delivery_home REAL NOT NULL DEFAULT 0,
-  delivery_stopdesk REAL NOT NULL DEFAULT 0,
-  pickup_home REAL NOT NULL DEFAULT 0,
-  pickup_stopdesk REAL NOT NULL DEFAULT 0,
-  exchange_home REAL NOT NULL DEFAULT 0,
-  exchange_stopdesk REAL NOT NULL DEFAULT 0,
-  collection_home REAL NOT NULL DEFAULT 0,
-  collection_stopdesk REAL NOT NULL DEFAULT 0,
-  return_home REAL NOT NULL DEFAULT 0,
-  return_stopdesk REAL NOT NULL DEFAULT 0,
-  raw TEXT,
-  synced_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS ecotrack_products (
-  reference TEXT PRIMARY KEY,
-  barcode TEXT DEFAULT '',
-  title TEXT DEFAULT '',
-  is_active INTEGER NOT NULL DEFAULT 1,
-  image TEXT DEFAULT '',
-  stock_disponible INTEGER DEFAULT 0,
-  stock_reserve INTEGER DEFAULT 0,
-  stock_phisique INTEGER DEFAULT 0,
-  synced_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS activity_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER,
-  username TEXT DEFAULT '',
-  action TEXT NOT NULL,
-  entity TEXT DEFAULT '',
-  entity_id TEXT DEFAULT '',
-  details TEXT DEFAULT '',
-  ok INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_log_created ON activity_log(created_at);
-
-CREATE TABLE IF NOT EXISTS sync_jobs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL,
-  status TEXT NOT NULL,
-  message TEXT DEFAULT '',
-  count INTEGER DEFAULT 0,
-  started_at TEXT NOT NULL,
-  finished_at TEXT
-);
-`;
-
-db.exec(SCHEMA);
+/** يجلب كل الأسطر على صفحات (لتجاوز حد 1000 سطر لكل طلب) */
+export async function fetchAllPages(build, what = 'fetchAll', maxPages = 50) {
+  const out = [];
+  for (let from = 0, page = 0; page < maxPages; from += REST_PAGE, page += 1) {
+    const rows = must(await build(from, from + REST_PAGE - 1), what);
+    out.push(...rows);
+    if (rows.length < REST_PAGE) break;
+  }
+  return out;
+}
 
 // ── الإعدادات ────────────────────────────────────────────────
-export function getSetting(key, fallback = null) {
-  const row = get('SELECT value FROM settings WHERE key = ?', [key]);
+export async function getSetting(key, fallback = null) {
+  const row = must(
+    await supabase.from('settings').select('value').eq('key', key).maybeSingle(),
+    'getSetting',
+  );
   if (!row) return fallback;
   try {
     return JSON.parse(row.value);
@@ -283,18 +77,18 @@ export function getSetting(key, fallback = null) {
   }
 }
 
-export function setSetting(key, value) {
+export async function setSetting(key, value) {
   const payload = typeof value === 'string' ? value : JSON.stringify(value);
-  run(
-    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    [key, payload, now()],
+  must(
+    await supabase.from('settings').upsert({ key, value: payload, updated_at: now() }, { onConflict: 'key' }),
+    'setSetting',
   );
 }
 
-export function allSettings() {
+export async function allSettings() {
+  const rows = must(await supabase.from('settings').select('key, value'), 'allSettings');
   const out = {};
-  for (const row of all('SELECT key, value FROM settings')) {
+  for (const row of rows) {
     try {
       out[row.key] = JSON.parse(row.value);
     } catch {
@@ -304,35 +98,51 @@ export function allSettings() {
   return out;
 }
 
-export function logActivity(userId, username, action, entity = '', entityId = '', details = '', ok = 1) {
+export async function logActivity(userId, username, action, entity = '', entityId = '', details = '', ok = 1) {
   try {
-    run(
-      `INSERT INTO activity_log (user_id, username, action, entity, entity_id, details, ok, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId ?? null, username ?? '', action, entity, String(entityId ?? ''), typeof details === 'string' ? details : JSON.stringify(details), ok ? 1 : 0, now()],
-    );
+    await supabase.from('activity_log').insert({
+      user_id: userId ?? null,
+      username: username ?? '',
+      action,
+      entity,
+      entity_id: String(entityId ?? ''),
+      details: typeof details === 'string' ? details : JSON.stringify(details),
+      ok: ok ? 1 : 0,
+      created_at: now(),
+    });
   } catch {
     /* لا نُفشل الطلب بسبب السجل */
   }
 }
 
+/** يعيد عدد الأسطر المطابقة (يُستخدم مع  count: 'exact', head: true) */
+export async function countRows(queryPromise, what = 'count') {
+  const res = await queryPromise;
+  must(res, what);
+  return Number(res.count || 0);
+}
+
 // ── البذرة الأولى ────────────────────────────────────────────
-export function seedIfEmpty() {
-  const users = get('SELECT COUNT(*) AS c FROM users');
-  if (num0(users) > 0) return false;
+export async function seedIfEmpty() {
+  const count = await countRows(
+    supabase.from('users').select('id', { count: 'exact', head: true }),
+    'seed.check',
+  );
+  if (count > 0) return false;
 
   const stamp = now();
 
   // المستخدم الإداري
-  run(
-    `INSERT INTO users (username, name, password_hash, role, active, created_at)
-     VALUES (?, ?, ?, 'admin', 1, ?)`,
-    [
-      process.env.ADMIN_USERNAME || 'admin',
-      'المدير',
-      hashPassword(process.env.ADMIN_PASSWORD || 'admin123'),
-      stamp,
-    ],
+  must(
+    await supabase.from('users').insert({
+      username: process.env.ADMIN_USERNAME || 'admin',
+      name: 'المدير',
+      password_hash: hashPassword(process.env.ADMIN_PASSWORD || 'admin123'),
+      role: 'admin',
+      active: 1,
+      created_at: stamp,
+    }),
+    'seed.user',
   );
 
   // الإعدادات الافتراضية
@@ -365,41 +175,49 @@ export function seedIfEmpty() {
       low_stock_alert: 5,
     },
   };
-  for (const [k, v] of Object.entries(defaults)) setSetting(k, v);
+  for (const [k, v] of Object.entries(defaults)) await setSetting(k, v);
 
-  // الولايات والبلديات المبدئية
-  const insWilaya = db.prepare(
-    `INSERT OR IGNORE INTO wilayas (wilaya_id, name_fr, name_ar, active, has_stop_desk) VALUES (?, ?, ?, 1, 0)`,
-  );
-  for (const [id, fr, ar] of WILAYAS) insWilaya.run(id, fr, ar);
-
-  const insCommune = db.prepare(
-    `INSERT OR IGNORE INTO communes (wilaya_id, name, code_postal, has_stop_desk) VALUES (?, ?, '', 0)`,
-  );
-  for (const [wilayaId, names] of Object.entries(COMMUNES)) {
-    for (const name of names) insCommune.run(Number(wilayaId), name);
-  }
-
-  // أسعار تجريبية
-  const insFee = db.prepare(
-    `INSERT OR IGNORE INTO shipping_fees (wilaya_id, wilaya_name, delivery_home, delivery_stopdesk,
-      pickup_home, pickup_stopdesk, exchange_home, exchange_stopdesk,
-      collection_home, collection_stopdesk, return_home, return_stopdesk, raw, synced_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  for (const f of mockFees()) {
-    insFee.run(
-      f.wilaya_id, f.wilaya_name,
-      Number(f.livraison.tarif), Number(f.livraison.tarif_stopdesk),
-      Number(f.pickup.tarif), Number(f.pickup.tarif_stopdesk),
-      Number(f.echange.tarif), Number(f.echange.tarif_stopdesk),
-      Number(f.recouvrement.tarif), Number(f.recouvrement.tarif_stopdesk),
-      Number(f.retour.tarif), Number(f.retour.tarif_stopdesk),
-      JSON.stringify(f), stamp,
+  // الولايات
+  for (const part of chunk(WILAYAS, 400)) {
+    must(
+      await supabase.from('wilayas').upsert(
+        part.map(([id, fr, ar]) => ({ wilaya_id: id, name_fr: fr, name_ar: ar, active: 1, has_stop_desk: 0 })),
+        { onConflict: 'wilaya_id', ignoreDuplicates: true },
+      ),
+      'seed.wilayas',
     );
   }
 
-  // تصنيفات
+  // البلديات
+  const communes = Object.entries(COMMUNES).flatMap(([wid, names]) =>
+    names.map((name) => ({ wilaya_id: Number(wid), name, code_postal: '', has_stop_desk: 0 })));
+  for (const part of chunk(communes, 400)) {
+    must(
+      await supabase.from('communes').upsert(part, { onConflict: 'wilaya_id,name', ignoreDuplicates: true }),
+      'seed.communes',
+    );
+  }
+
+  // أسعار تجريبية
+  const fees = mockFees().map((f) => ({
+    wilaya_id: f.wilaya_id,
+    wilaya_name: f.wilaya_name,
+    delivery_home: Number(f.livraison.tarif),
+    delivery_stopdesk: Number(f.livraison.tarif_stopdesk),
+    pickup_home: Number(f.pickup.tarif),
+    pickup_stopdesk: Number(f.pickup.tarif_stopdesk),
+    exchange_home: Number(f.echange.tarif),
+    exchange_stopdesk: Number(f.echange.tarif_stopdesk),
+    collection_home: Number(f.recouvrement.tarif),
+    collection_stopdesk: Number(f.recouvrement.tarif_stopdesk),
+    return_home: Number(f.retour.tarif),
+    return_stopdesk: Number(f.retour.tarif_stopdesk),
+    raw: JSON.stringify(f),
+    synced_at: stamp,
+  }));
+  must(await supabase.from('shipping_fees').upsert(fees, { onConflict: 'wilaya_id' }), 'seed.fees');
+
+  // التصنيفات (نحفظ المعرّفات الفعلية لربط المنتجات بها)
   const cats = [
     ['إلكترونيات', 'Électronique', 'Electronics'],
     ['أزياء', 'Mode', 'Fashion'],
@@ -407,36 +225,42 @@ export function seedIfEmpty() {
     ['تجميل وعناية', 'Beauté & Soin', 'Beauty & Care'],
     ['رياضة', 'Sport', 'Sports'],
   ];
+  const categoryIds = [];
   for (const [ar, fr, en] of cats) {
-    run(
-      `INSERT INTO categories (name_ar, name_fr, name_en, slug, active, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
-      [ar, fr, en, String(Math.random()).slice(2, 8), stamp],
+    const row = must(
+      await supabase.from('categories').insert({
+        name_ar: ar, name_fr: fr, name_en: en,
+        slug: String(Math.random()).slice(2, 8), active: 1, created_at: stamp,
+      }).select('id').single(),
+      'seed.category',
     );
+    categoryIds.push(Number(row.id));
   }
 
   // منتجات تجريبية
   const products = [
-    ['SKU-001', 'سماعات بلوتوث لاسلكية', 'Écouteurs Bluetooth', 'Wireless Earbuds', 1, 4500, 2800, 40, 0.3, 0],
-    ['SKU-002', 'ساعة ذكية رياضية', 'Montre connectée sport', 'Smart Sport Watch', 1, 8900, 5600, 25, 0.2, 0],
-    ['SKU-003', 'شاحن سريع 65W', 'Chargeur rapide 65W', '65W Fast Charger', 1, 3200, 1900, 60, 0.25, 0],
-    ['SKU-004', 'حقيبة ظهر مقاومة للماء', 'Sac à dos étanche', 'Waterproof Backpack', 2, 5400, 3100, 18, 0.7, 0],
-    ['SKU-005', 'قميص قطني رجالي', 'T-shirt coton homme', "Men's Cotton T-Shirt", 2, 2200, 1100, 80, 0.25, 0],
-    ['SKU-006', 'حذاء رياضي خفيف', 'Chaussures de sport', 'Running Shoes', 2, 11500, 7200, 12, 0.9, 0],
-    ['SKU-007', 'طقم أواني طبخ 12 قطعة', 'Set de cuisine 12 pièces', '12-Pc Cookware Set', 3, 14500, 9800, 9, 4.5, 1],
-    ['SKU-008', 'مقلاة غير لاصقة 28سم', 'Poêle antiadhésive 28cm', 'Non-stick Pan 28cm', 3, 3900, 2200, 22, 1.2, 1],
-    ['SKU-009', 'كريم مرطب بالأرغان', 'Crème hydratante Argan', 'Argan Moisturizer', 4, 2600, 1400, 50, 0.2, 0],
-    ['SKU-010', 'شامبو بالزيوت الطبيعية', 'Shampoing aux huiles', 'Natural Oil Shampoo', 4, 1900, 950, 3, 0.35, 0],
-    ['SKU-011', 'سجادة رياضية', 'Tapis de sport', 'Yoga Mat', 5, 4100, 2400, 15, 1.5, 0],
-    ['SKU-012', 'دمبلز حديد 10كغ', 'Haltères 10 kg', '10kg Dumbbell Set', 5, 9800, 6300, 2, 10, 1],
+    ['SKU-001', 'سماعات بلوتوث لاسلكية', 'Écouteurs Bluetooth', 'Wireless Earbuds', 0, 4500, 2800, 40, 0.3, 0],
+    ['SKU-002', 'ساعة ذكية رياضية', 'Montre connectée sport', 'Smart Sport Watch', 0, 8900, 5600, 25, 0.2, 0],
+    ['SKU-003', 'شاحن سريع 65W', 'Chargeur rapide 65W', '65W Fast Charger', 0, 3200, 1900, 60, 0.25, 0],
+    ['SKU-004', 'حقيبة ظهر مقاومة للماء', 'Sac à dos étanche', 'Waterproof Backpack', 1, 5400, 3100, 18, 0.7, 0],
+    ['SKU-005', 'قميص قطني رجالي', 'T-shirt coton homme', "Men's Cotton T-Shirt", 1, 2200, 1100, 80, 0.25, 0],
+    ['SKU-006', 'حذاء رياضي خفيف', 'Chaussures de sport', 'Running Shoes', 1, 11500, 7200, 12, 0.9, 0],
+    ['SKU-007', 'طقم أواني طبخ 12 قطعة', 'Set de cuisine 12 pièces', '12-Pc Cookware Set', 2, 14500, 9800, 9, 4.5, 1],
+    ['SKU-008', 'مقلاة غير لاصقة 28سم', 'Poêle antiadhésive 28cm', 'Non-stick Pan 28cm', 2, 3900, 2200, 22, 1.2, 1],
+    ['SKU-009', 'كريم مرطب بالأرغان', 'Crème hydratante Argan', 'Argan Moisturizer', 3, 2600, 1400, 50, 0.2, 0],
+    ['SKU-010', 'شامبو بالزيوت الطبيعية', 'Shampoing aux huiles', 'Natural Oil Shampoo', 3, 1900, 950, 3, 0.35, 0],
+    ['SKU-011', 'سجادة رياضية', 'Tapis de sport', 'Yoga Mat', 4, 4100, 2400, 15, 1.5, 0],
+    ['SKU-012', 'دمبلز حديد 10كغ', 'Haltères 10 kg', '10kg Dumbbell Set', 4, 9800, 6300, 2, 10, 1],
   ];
-  for (const [sku, ar, fr, en, cat, price, cost, stock, weight, fragile] of products) {
-    run(
-      `INSERT INTO products (sku, name_ar, name_fr, name_en, description, price, cost, stock, category_id,
-        image_url, weight, fragile, ecotrack_reference, active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, '', ?, ?, ?, 1, ?, ?)`,
-      [sku, ar, fr, en, price, cost, stock, cat, weight, fragile, sku, stamp, stamp],
-    );
-  }
+  must(
+    await supabase.from('products').insert(products.map(([sku, ar, fr, en, cat, price, cost, stock, weight, fragile]) => ({
+      sku, name_ar: ar, name_fr: fr, name_en: en, description: '',
+      price, cost, stock, category_id: categoryIds[cat],
+      image_url: '', weight, fragile, ecotrack_reference: sku,
+      active: 1, created_at: stamp, updated_at: stamp,
+    }))),
+    'seed.products',
+  );
 
   // عملاء + طلبيات تجريبية
   const demoCustomers = [
@@ -447,13 +271,12 @@ export function seedIfEmpty() {
     ['محمد طويل', '0699887766', '', 30, 'Rouissat', 'Hay Nasr Bt 04'],
     ['ليلى حداد', '0554231567', '', 35, 'Thenia', 'Rue de la Gare'],
   ];
-  const insCustomer = db.prepare(
-    `INSERT OR IGNORE INTO customers (name, phone, phone2, email, wilaya_id, commune, address, notes, created_at)
-     VALUES (?, ?, ?, '', ?, ?, ?, '', ?)`,
+  must(
+    await supabase.from('customers').insert(demoCustomers.map(([name, phone, phone2, wilaya, commune, address]) => ({
+      name, phone, phone2, email: '', wilaya_id: wilaya, commune, address, notes: '', created_at: stamp,
+    }))),
+    'seed.customers',
   );
-  for (const [name, phone, phone2, wilaya, commune, address] of demoCustomers) {
-    insCustomer.run(name, phone, phone2, wilaya, commune, address, stamp);
-  }
 
   const statuses = [
     ['draft', ''], ['prete_a_expedier', 'EC' + rand(12)], ['en_livraison', 'EC' + rand(12)],
@@ -474,53 +297,50 @@ export function seedIfEmpty() {
     const orderNumber = `CMD-20260${(n % 9) + 1}1${String(n).padStart(2, '0')}`;
     const created = new Date(Date.now() - n * 86400000).toISOString().slice(0, 19).replace('T', ' ');
 
-    const info = run(
-      `INSERT INTO orders (order_number, customer_id, customer_name, phone, phone2, wilaya_id, wilaya_name,
-        commune, address, stop_desk, subtotal, shipping_fee, discount, total, status, payment_status,
-        source, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?, ?, 'admin', '', ?, ?)`,
-      [orderNumber, null, cust[0], cust[1], cust[2], wilayaId, wilayaName, cust[4], cust[5],
-        subtotal, shipping, total, status, status === 'livre_non_encaisse' ? 'collected' : 'unpaid', created, created],
+    const orderRow = must(
+      await supabase.from('orders').insert({
+        order_number: orderNumber, customer_id: null, customer_name: cust[0], phone: cust[1], phone2: cust[2],
+        wilaya_id: wilayaId, wilaya_name: wilayaName, commune: cust[4], address: cust[5],
+        stop_desk: 0, subtotal, shipping_fee: shipping, discount: 0, total,
+        status, payment_status: status === 'livre_non_encaisse' ? 'collected' : 'unpaid',
+        source: 'admin', notes: '', created_at: created, updated_at: created,
+      }).select('id').single(),
+      'seed.order',
     );
-    const orderId = Number(info.lastInsertRowid);
+    const orderId = Number(orderRow.id);
 
-    for (const it of items) {
-      run(
-        `INSERT INTO order_items (order_id, product_id, name, sku, qty, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [orderId, null, it.name, 'SKU-DEMO', it.qty, it.price, it.price * it.qty],
-      );
-    }
+    must(
+      await supabase.from('order_items').insert(items.map((it) => ({
+        order_id: orderId, product_id: null, name: it.name, sku: 'SKU-DEMO',
+        qty: it.qty, unit_price: it.price, line_total: it.price * it.qty,
+      }))),
+      'seed.order_items',
+    );
 
     if (tracking) {
-      run(
-        `INSERT INTO shipments (order_id, tracking, reference, type, stop_desk, produit, quantite,
-          stock, boutique, remarque, weight, fragile, ecotrack_status, delivery_fee, pushed_at)
-         VALUES (?, ?, ?, 1, 0, ?, '', 0, '', '', 1, 0, ?, ?, ?)`,
-        [
-          orderId,
-          tracking,
-          orderNumber,
-          items.map((i) => `${i.name} x${i.qty}`).join(' / '),
-          status,
-          shipping,
-          created,
-        ],
+      must(
+        await supabase.from('shipments').insert({
+          order_id: orderId, tracking, reference: orderNumber, type: 1, stop_desk: 0,
+          produit: items.map((i) => `${i.name} x${i.qty}`).join(' / '),
+          quantite: '', stock: 0, boutique: '', remarque: '',
+          weight: 1, fragile: 0, ecotrack_status: status, delivery_fee: shipping, pushed_at: created,
+        }),
+        'seed.shipment',
       );
-      run(
-        `INSERT INTO order_events (order_id, tracking, status, activity, station, driver, details, event_date, event_time, created_at)
-         VALUES (?, ?, ?, ?, '', '', '', ?, '', ?)`,
-        [orderId, tracking, status, 'order_information_received_by_carrier', created.slice(0, 10), created],
+      must(
+        await supabase.from('order_events').insert({
+          order_id: orderId, tracking, status, activity: 'order_information_received_by_carrier',
+          station: '', driver: '', details: '', event_date: created.slice(0, 10), event_time: '', created_at: created,
+        }),
+        'seed.event',
       );
     }
   }
 
-  logActivity(null, 'system', 'seed', 'database', '', 'تهيئة قاعدة البيانات والبيانات التجريبية', 1);
+  await logActivity(null, 'system', 'seed', 'database', '', 'تهيئة قاعدة البيانات والبيانات التجريبية', 1);
   return true;
 }
 
-function num0(row) {
-  return Number(row?.c ?? 0);
-}
 function rand(len) {
   let s = '';
   for (let i = 0; i < len; i += 1) s += '0123456789'[Math.floor(Math.random() * 10)];
@@ -540,15 +360,19 @@ function sampleItems(n) {
   return a.name === b.name ? [b] : [a, b];
 }
 
-export function resetDb() {
-  db.exec(`
-    DELETE FROM order_events; DELETE FROM shipments; DELETE FROM order_items;
-    DELETE FROM orders; DELETE FROM customers; DELETE FROM products; DELETE FROM categories;
-    DELETE FROM shipping_fees; DELETE FROM wilayas; DELETE FROM communes; DELETE FROM desks;
-    DELETE FROM ecotrack_products; DELETE FROM activity_log; DELETE FROM sync_jobs;
-    DELETE FROM sessions; DELETE FROM users; DELETE FROM settings;
-  `);
-  seedIfEmpty();
+/** إعادة تهيئة قاعدة البيانات على Supabase (حذف كل الصفوف ثم البذرة من جديد) */
+export async function resetDb() {
+  const tables = [
+    ['order_events', 'id'], ['shipments', 'id'], ['order_items', 'id'], ['orders', 'id'],
+    ['customers', 'id'], ['products', 'id'], ['categories', 'id'],
+    ['communes', 'id'], ['desks', 'id'],
+    ['shipping_fees', 'wilaya_id'], ['wilayas', 'wilaya_id'], ['ecotrack_products', 'reference'],
+    ['activity_log', 'id'], ['sync_jobs', 'id'], ['sessions', 'token'], ['users', 'id'], ['settings', 'key'],
+  ];
+  for (const [table, pk] of tables) {
+    must(await supabase.from(table).delete().not(pk, 'is', null), `reset.${table}`);
+  }
+  await seedIfEmpty();
 }
 
 export { uid };

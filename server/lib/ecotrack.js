@@ -72,8 +72,8 @@ export const ORDER_TYPES = [
 ];
 
 // ── الإعدادات الحالية ─────────────────────────────────────────
-export function getConfig() {
-  const cfg = getSetting('ecotrack', {}) || {};
+export async function getConfig() {
+  const cfg = (await getSetting('ecotrack', {})) || {};
   const mockEnv = process.env.ECOTRACK_MOCK === '1';
   const baseUrl = String(cfg.base_url || process.env.ECOTRACK_BASE_URL || '').replace(/\/+$/, '');
   const token = String(cfg.api_token || process.env.ECOTRACK_API_TOKEN || '');
@@ -89,8 +89,8 @@ export function getConfig() {
   };
 }
 
-export function isMock() {
-  return getConfig().mock;
+export async function isMock() {
+  return (await getConfig()).mock;
 }
 
 // ── محوّلات الأخطاء ───────────────────────────────────────────
@@ -125,7 +125,7 @@ function parseFailure(status, data, text) {
 
 // ── الطلب الأساسي ─────────────────────────────────────────────
 async function request(method, path, { query = {}, body = null, raw = false, config } = {}) {
-  const cfg = config || getConfig();
+  const cfg = config || (await getConfig());
   if (cfg.mock) return mockRequest(method, path, { query, body });
   if (!cfg.baseUrl || !cfg.token) {
     throw new EcotrackError('إعدادات Ecotrack غير مكتملة: أدخل الرابط الأساسي والتوكن من شاشة «التوصيل ← الإعدادات».', {

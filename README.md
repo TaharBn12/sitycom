@@ -6,34 +6,54 @@
 استدعاؤها من لوحة التحكم أو عبر API المحلي.
 
 > الواجهة: **HTML + CSS + JavaScript** (بدون إطارات) · الخادم: **Node.js + Express** ·
-> القاعدة: **SQLite** المدمجة في Node (`node:sqlite` — صفر اعتماديات أصلية).
+> القاعدة: **Supabase (PostgreSQL)** عبر REST API بمفتاح `anon`.
 > ثلاث لغات: 🇩🇿 العربية (RTL) · 🇫🇷 الفرنسية · 🇬🇧 الإنجليزية.
 
 ---
 
 ## 1. التشغيل السريع
 
+### 1.1 إعداد قاعدة Supabase (مرة واحدة)
+
+1. أنشئ مشروعاً على [supabase.com](https://supabase.com) (أو استخدم مشروعاً موجوداً).
+2. من لوحة المشروع افتح **SQL Editor ← New query**.
+3. الصق محتوى الملف **`database/supabase.sql`** كاملاً ثم اضغط **Run**.
+   (ينشئ 17 جدولاً + الفهارس + سياسات الأمان + دوال التجميع للوحة والتقارير وقائمة الطلبيات.)
+4. من **Settings ← API** انسخ:
+   - **Project URL** ← ضعه في `SUPABASE_URL`
+   - **anon public key** ← ضعه في `SUPABASE_ANON_KEY`
+
+> الخادم يستخدم مفتاح `anon` مع سياسات RLS مفتوحة للتطبيق الداخلي.
+> عند أول تشغيل ينشئ الخادم المستخدم الإداري والبيانات التجريبية تلقائياً على Supabase.
+
+### 1.2 التشغيل
+
 ```bash
-# يتطلب Node.js 22.5 أو أحدث (لأننا نستخدم قاعدة node:sqlite المدمجة)
-node -v
+node -v                # يتطلب Node.js 18 أو أحدث
 
 git clone <repo> && cd sitycom
-npm install          # يُثبّت Express فقط
-npm start            # http://localhost:3000
+npm install            # يثبّت Express + @supabase/supabase-js
+cp .env.example .env   # ثم ضع SUPABASE_URL و SUPABASE_ANON_KEY
+npm start              # http://localhost:3000
 ```
 
 - لوحة التحكم: <http://localhost:3000/> (أو `/index.html`)
 - صفحة تتبّع الزبون (عمومية بدون دخول): <http://localhost:3000/track.html>
 - بيانات الدخول التجريبية: `admin` / `admin123`
+- فحص حالة القاعدة: <http://localhost:3000/api/health>
 
 للتطوير مع إعادة التشغيل التلقائي: `npm run dev`
-لإعادة تهيئة القاعدة والبيانات التجريبية: `npm run reset-db`
+لإعادة تهيئة القاعدة (حذف كل الصفوف على Supabase وإعادة البيانات التجريبية): `npm run reset-db`
 
 ### ملف `.env`
 
-انسخ `.env.example` إلى `.env` وعدّله (ملف `.env` غير مُرفوع إلى Git):
+انسخ `.env.example` إلى `.env` وعدّله (ملف `.env` غير مرفوع إلى Git):
 
 ```env
+# قاعدة البيانات (من لوحة Supabase ← Settings ← API)
+SUPABASE_URL=https://xxxxxxxx.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIs...
+
 PORT=3000
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
@@ -46,7 +66,6 @@ ECOTRACK_TIMEOUT=20000
 ```
 
 ---
-
 ## 2. الاستضافة على InfinityFree (PHP + MySQL)
 
 نسخة PHP جاهزة للرفع على أي استضافة مشتركة (InfinityFree تستضيف PHP + MySQL فقط — لا تدعم Node.js).
@@ -132,7 +151,7 @@ return [
 | | Node.js (`server/`) | PHP (`api/`) |
 |---|---|---|
 | الاستخدام | التشغيل المحلي/خادم VPS | الاستضافة المشتركة (InfinityFree) |
-| القاعدة | SQLite (`node:sqlite`) | MySQL (ويمكن SQLite للتجربة) |
+| القاعدة | **Supabase (PostgreSQL)** عبر REST | MySQL (ويمكن SQLite للتجربة) |
 | التشغيل | `npm start` | Apache + PHP |
 | الواجهة والـ API | **نفس الواجهة ونفس مسارات الـ API تماماً** | |
 
@@ -242,10 +261,12 @@ sitycom/
 │   ├── setup.php         # صفحة التثبيت
 │   ├── lib/              # db.php (PDO + مخطط) · ecotrack.php · util.php · geo.php
 │   └── routes/           # auth · orders · catalog · eco · misc · helpers
-├── database/mysql.sql    # مخطط MySQL للاستيراد اليدوي
+├── database/
+│   ├── supabase.sql         # ⭐ مخطط Supabase (PostgreSQL) — يُنفذ مرة واحدة في SQL Editor
+│   └── mysql.sql            # مخطط MySQL لنسخة PHP (للاستيراد اليدوي)
 ├── server/
 │   ├── index.js              # الخادم + المسارات العامة
-│   ├── db.js                 # المخطط + البذرة + الإعدادات
+│   ├── db.js                 # طبقة بيانات Supabase (العميل + البذرة + الإعدادات)
 │   ├── lib/
 │   │   ├── ecotrack.js       # ⭐ عميل Ecotrack الكامل (21 endpoint + Mock)
 │   │   ├── auth.js · util.js · env.js
@@ -261,7 +282,7 @@ sitycom/
 │           └── pages/*.js
 ├── docs/ECOTRACK.md          # مرجع API الكامل
 ├── .htaccess                 # يُنسخ إلى htdocs عند الرفع
-└── data/sitycom.db           # القاعدة (غير مرفوعة)
+└── .env                      # SUPABASE_URL + SUPABASE_ANON_KEY (غير مرفوع)
 ```
 
 ---
@@ -296,7 +317,7 @@ sitycom/
 | `10001 Commande non modifiable` | الطلبية صُودق عليها؛ لا يمكن تعديلها/حذفها |
 | `422 The given data was invalid` | اسم البلدية غير مطابق تماماً لقائمة Ecotrack — استخدم زر المزامنة واختر من القائمة |
 | `429 Too Many Attempts` | تجاوزت 50 طلب/دقيقة — انتظر قليلاً |
-| خطأ في القاعدة | احذف `data/sitycom.db` ثم `npm start` لإعادة التهيئة |
+| خطأ في القاعدة | نفّذ `database/supabase.sql` في SQL Editor، وتحقق من `SUPABASE_URL` و`SUPABASE_ANON_KEY` في `.env`، وافتح `/api/health` |
 
 ---
 

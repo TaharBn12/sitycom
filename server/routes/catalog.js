@@ -1,127 +1,162 @@
 import express from 'express';
-import { get, run, all, logActivity } from '../db.js';
+import { supabase, must, countRows, logActivity } from '../db.js';
 import { asyncRoute, HttpError, now, pagination, num, int, bool01, norm } from '../lib/util.js';
 import { requireAuth } from '../lib/auth.js';
 
 const router = express.Router();
 
+/** قيمة بحث داخل صيغة or() مع تهريب الأحرف الخاصة */
+const likeVal = (s) => JSON.stringify(`%${s}%`);
+const eqVal = (s) => JSON.stringify(String(s));
+
+/** يفك تضمين اسم التصنيف من شكل  {categories:{name_ar}}  إلى حقل مسطح */
+function flatCategory(row) {
+  if (!row) return row;
+  row.category_name = row.categories?.name_ar ?? null;
+  delete row.categories;
+  return row;
+}
+
 // ══════════════════════ التصنيفات ══════════════════════
 router.get('/categories', requireAuth, asyncRoute(async (_req, res) => {
-  res.json({ ok: true, categories: all('SELECT * FROM categories ORDER BY id') });
+  const categories = must(await supabase.from('categories').select('*').order('id'), 'categories.list');
+  res.json({ ok: true, categories });
 }));
 
 router.post('/categories', requireAuth, asyncRoute(async (req, res) => {
   const { name_ar, name_fr, name_en } = req.body || {};
   if (!name_ar) throw new HttpError(400, 'اسم التصنيف بالعربية مطلوب');
-  const info = run(
-    `INSERT INTO categories (name_ar, name_fr, name_en, slug, active, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
-    [name_ar, name_fr || '', name_en || '', String(Date.now()).slice(-6), now()],
+  const row = must(
+    await supabase.from('categories').insert({
+      name_ar, name_fr: name_fr || '', name_en: name_en || '',
+      slug: String(Date.now()).slice(-6), active: 1, created_at: now(),
+    }).select('id').single(),
+    'categories.create',
   );
-  logActivity(req.user.id, req.user.username, 'category.create', 'category', info.lastInsertRowid, name_ar, 1);
-  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+  await logActivity(req.user.id, req.user.username, 'category.create', 'category', row.id, name_ar, 1);
+  res.json({ ok: true, id: Number(row.id) });
 }));
 
 router.put('/categories/:id', requireAuth, asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
   const { name_ar, name_fr, name_en, active } = req.body || {};
-  run(
-    `UPDATE categories SET name_ar = ?, name_fr = ?, name_en = ?, active = ? WHERE id = ?`,
-    [name_ar ?? '', name_fr ?? '', name_en ?? '', bool01(active), id],
+  must(
+    await supabase.from('categories').update({
+      name_ar: name_ar ?? '', name_fr: name_fr ?? '', name_en: name_en ?? '', active: bool01(active),
+    }).eq('id', id),
+    'categories.update',
   );
-  logActivity(req.user.id, req.user.username, 'category.update', 'category', id, '', 1);
+  await logActivity(req.user.id, req.user.username, 'category.update', 'category', id, '', 1);
   res.json({ ok: true });
 }));
 
 router.delete('/categories/:id', requireAuth, asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
-  run('UPDATE products SET category_id = NULL WHERE category_id = ?', [id]);
-  run('DELETE FROM categories WHERE id = ?', [id]);
-  logActivity(req.user.id, req.user.username, 'category.delete', 'category', id, '', 1);
+  must(await supabase.from('products').update({ category_id: null }).eq('category_id', id), 'categories.detach');
+  must(await supabase.from('categories').delete().eq('id', id), 'categories.delete');
+  await logActivity(req.user.id, req.user.username, 'category.delete', 'category', id, '', 1);
   res.json({ ok: true });
 }));
 
 // ══════════════════════ المنتجات ══════════════════════
-function productSql(where, params, { page, limit, offset }) {
-  const rows = all(
-    `SELECT p.*, c.name_ar AS category_name
-     FROM products p LEFT JOIN categories c ON c.id = p.category_id
-     ${where}
-     ORDER BY p.id DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset],
-  );
-  const totalRow = get(
-    `SELECT COUNT(*) AS c FROM products p LEFT JOIN categories c ON c.id = p.category_id ${where}`,
-    params,
-  );
-  return { rows, total: Number(totalRow?.c || 0), page, limit };
+function applyProductFilters(query, req) {
+  if (req.query.q) {
+    const q = norm(req.query.q);
+    query = query.or(
+      `name_ar.ilike.${likeVal(q)},name_fr.ilike.${likeVal(q)},name_en.ilike.${likeVal(q)},sku.ilike.${likeVal(String(req.query.q).toLowerCase())}`,
+    );
+  }
+  if (req.query.category_id) query = query.eq('category_id', int(req.query.category_id));
+  if (req.query.status === 'low') query = query.lte('stock', 5);
+  if (req.query.status === 'out') query = query.lte('stock', 0);
+  if (req.query.status === 'active') query = query.eq('active', 1);
+  if (req.query.status === 'inactive') query = query.eq('active', 0);
+  return query;
 }
 
 router.get('/products', requireAuth, asyncRoute(async (req, res) => {
   const { page, limit, offset } = pagination(req.query, 24, 500);
-  const where = [];
-  const params = [];
-  if (req.query.q) {
-    where.push('(LOWER(p.name_ar) LIKE ? OR LOWER(p.name_fr) LIKE ? OR LOWER(p.name_en) LIKE ? OR LOWER(p.sku) LIKE ?)');
-    const q = `%${norm(req.query.q)}%`;
-    params.push(q, q, q, `%${String(req.query.q).toLowerCase()}%`);
-  }
-  if (req.query.category_id) { where.push('p.category_id = ?'); params.push(int(req.query.category_id)); }
-  if (req.query.status === 'low') where.push('p.stock <= 5');
-  if (req.query.status === 'out') where.push('p.stock <= 0');
-  if (req.query.status === 'active') where.push('p.active = 1');
-  if (req.query.status === 'inactive') where.push('p.active = 0');
-  const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const { rows, total } = productSql(w, params, { page, limit, offset });
-  res.json({ ok: true, products: rows, total, page, limit, pages: Math.ceil(total / limit) });
+  const rows = must(
+    await applyProductFilters(supabase.from('products').select('*, categories(name_ar)'), req)
+      .order('id', { ascending: false })
+      .range(offset, offset + limit - 1),
+    'products.list',
+  );
+  const total = await countRows(
+    applyProductFilters(supabase.from('products').select('id', { count: 'exact', head: true }), req),
+    'products.count',
+  );
+  res.json({
+    ok: true,
+    products: rows.map(flatCategory),
+    total, page, limit, pages: Math.ceil(total / limit),
+  });
 }));
 
 router.get('/products/:id', requireAuth, asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
-  const product = get(
-    `SELECT p.*, c.name_ar AS category_name FROM products p
-     LEFT JOIN categories c ON c.id = p.category_id WHERE p.id = ?`, [id]);
+  const product = must(
+    await supabase.from('products').select('*, categories(name_ar)').eq('id', id).maybeSingle(),
+    'products.get',
+  );
   if (!product) throw new HttpError(404, 'المنتج غير موجود');
-  res.json({ ok: true, product });
+  res.json({ ok: true, product: flatCategory(product) });
 }));
 
 router.post('/products', requireAuth, asyncRoute(async (req, res) => {
   const b = req.body || {};
   if (!b.name_ar) throw new HttpError(400, 'اسم المنتج مطلوب');
-  const info = run(
-    `INSERT INTO products (sku, name_ar, name_fr, name_en, description, price, cost, stock, category_id,
-      image_url, weight, fragile, ecotrack_reference, active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      b.sku || `SKU-${Date.now().toString().slice(-6)}`,
-      b.name_ar, b.name_fr || '', b.name_en || '', b.description || '',
-      num(b.price), num(b.cost), int(b.stock),
-      b.category_id ? int(b.category_id) : null,
-      b.image_url || '', num(b.weight), bool01(b.fragile),
-      b.ecotrack_reference || b.sku || '', bool01(b.active ?? 1), now(), now(),
-    ],
+  const row = must(
+    await supabase.from('products').insert({
+      sku: b.sku || `SKU-${Date.now().toString().slice(-6)}`,
+      name_ar: b.name_ar,
+      name_fr: b.name_fr || '',
+      name_en: b.name_en || '',
+      description: b.description || '',
+      price: num(b.price),
+      cost: num(b.cost),
+      stock: int(b.stock),
+      category_id: b.category_id ? int(b.category_id) : null,
+      image_url: b.image_url || '',
+      weight: num(b.weight),
+      fragile: bool01(b.fragile),
+      ecotrack_reference: b.ecotrack_reference || b.sku || '',
+      active: bool01(b.active ?? 1),
+      created_at: now(),
+      updated_at: now(),
+    }).select('id').single(),
+    'products.create',
   );
-  logActivity(req.user.id, req.user.username, 'product.create', 'product', info.lastInsertRowid, b.name_ar, 1);
-  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+  await logActivity(req.user.id, req.user.username, 'product.create', 'product', row.id, b.name_ar, 1);
+  res.json({ ok: true, id: Number(row.id) });
 }));
 
 router.put('/products/:id', requireAuth, asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
   const b = req.body || {};
-  const exists = get('SELECT id FROM products WHERE id = ?', [id]);
+  const exists = must(await supabase.from('products').select('id').eq('id', id).maybeSingle(), 'products.exists');
   if (!exists) throw new HttpError(404, 'المنتج غير موجود');
-  run(
-    `UPDATE products SET sku = ?, name_ar = ?, name_fr = ?, name_en = ?, description = ?, price = ?, cost = ?,
-      stock = ?, category_id = ?, image_url = ?, weight = ?, fragile = ?, ecotrack_reference = ?, active = ?, updated_at = ?
-     WHERE id = ?`,
-    [
-      b.sku || '', b.name_ar || '', b.name_fr || '', b.name_en || '', b.description || '',
-      num(b.price), num(b.cost), int(b.stock),
-      b.category_id ? int(b.category_id) : null,
-      b.image_url || '', num(b.weight), bool01(b.fragile),
-      b.ecotrack_reference || '', bool01(b.active ?? 1), now(), id,
-    ],
+  must(
+    await supabase.from('products').update({
+      sku: b.sku || '',
+      name_ar: b.name_ar || '',
+      name_fr: b.name_fr || '',
+      name_en: b.name_en || '',
+      description: b.description || '',
+      price: num(b.price),
+      cost: num(b.cost),
+      stock: int(b.stock),
+      category_id: b.category_id ? int(b.category_id) : null,
+      image_url: b.image_url || '',
+      weight: num(b.weight),
+      fragile: bool01(b.fragile),
+      ecotrack_reference: b.ecotrack_reference || '',
+      active: bool01(b.active ?? 1),
+      updated_at: now(),
+    }).eq('id', id),
+    'products.update',
   );
-  logActivity(req.user.id, req.user.username, 'product.update', 'product', id, b.name_ar || '', 1);
+  await logActivity(req.user.id, req.user.username, 'product.update', 'product', id, b.name_ar || '', 1);
   res.json({ ok: true });
 }));
 
@@ -129,22 +164,28 @@ router.patch('/products/:id/stock', requireAuth, asyncRoute(async (req, res) => 
   const id = Number(req.params.id);
   const { delta, stock } = req.body || {};
   if (stock !== undefined) {
-    run('UPDATE products SET stock = ?, updated_at = ? WHERE id = ?', [int(stock), now(), id]);
+    must(
+      await supabase.from('products').update({ stock: int(stock), updated_at: now() }).eq('id', id),
+      'products.stock.set',
+    );
   } else if (delta !== undefined) {
-    run('UPDATE products SET stock = MAX(0, stock + ?), updated_at = ? WHERE id = ?', [int(delta), now(), id]);
+    must(await supabase.rpc('product_adjust_stock', { p_id: id, p_delta: int(delta) }), 'products.stock.delta');
   } else {
     throw new HttpError(400, 'أرسل stock أو delta');
   }
-  const p = get('SELECT id, stock, name_ar FROM products WHERE id = ?', [id]);
-  logActivity(req.user.id, req.user.username, 'product.stock', 'product', id, String(p?.stock ?? ''), 1);
+  const p = must(
+    await supabase.from('products').select('id, stock, name_ar').eq('id', id).maybeSingle(),
+    'products.stock.get',
+  );
+  await logActivity(req.user.id, req.user.username, 'product.stock', 'product', id, String(p?.stock ?? ''), 1);
   res.json({ ok: true, product: p });
 }));
 
 router.delete('/products/:id', requireAuth, asyncRoute(async (req, res) => {
   const id = Number(req.params.id);
-  run('DELETE FROM order_items WHERE product_id = ?', [id]);
-  run('DELETE FROM products WHERE id = ?', [id]);
-  logActivity(req.user.id, req.user.username, 'product.delete', 'product', id, '', 1);
+  must(await supabase.from('order_items').delete().eq('product_id', id), 'products.items');
+  must(await supabase.from('products').delete().eq('id', id), 'products.delete');
+  await logActivity(req.user.id, req.user.username, 'product.delete', 'product', id, '', 1);
   res.json({ ok: true });
 }));
 
@@ -157,21 +198,46 @@ router.post('/products/import-ecotrack', requireAuth, asyncRoute(async (req, res
   for (const it of items) {
     const ref = String(it.reference || '').trim();
     if (!ref) continue;
-    const exists = get('SELECT id FROM products WHERE ecotrack_reference = ? OR sku = ?', [ref, ref]);
+    const exists = must(
+      await supabase.from('products').select('id')
+        .or(`ecotrack_reference.eq.${eqVal(ref)},sku.eq.${eqVal(ref)}`)
+        .maybeSingle(),
+      'products.import.find',
+    );
     if (exists) {
-      run('UPDATE products SET stock = ?, updated_at = ? WHERE id = ?', [int(it.stock_disponible), now(), exists.id]);
+      must(
+        await supabase.from('products')
+          .update({ stock: int(it.stock_disponible), updated_at: now() })
+          .eq('id', exists.id),
+        'products.import.update',
+      );
       updated += 1;
     } else {
-      run(
-        `INSERT INTO products (sku, name_ar, name_fr, name_en, description, price, cost, stock, category_id,
-          image_url, weight, fragile, ecotrack_reference, active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, '', 0, 0, ?, NULL, ?, 0, 0, ?, 1, ?, ?)`,
-        [ref, it.title || ref, it.title || ref, it.title || ref, int(it.stock_disponible), it.image || '', ref, now(), now()],
+      must(
+        await supabase.from('products').insert({
+          sku: ref,
+          name_ar: it.title || ref,
+          name_fr: it.title || ref,
+          name_en: it.title || ref,
+          description: '',
+          price: 0,
+          cost: 0,
+          stock: int(it.stock_disponible),
+          category_id: null,
+          image_url: it.image || '',
+          weight: 0,
+          fragile: 0,
+          ecotrack_reference: ref,
+          active: 1,
+          created_at: now(),
+          updated_at: now(),
+        }),
+        'products.import.insert',
       );
       created += 1;
     }
   }
-  logActivity(req.user.id, req.user.username, 'product.import', 'product', '', `${created} جديد / ${updated} محدّث`, 1);
+  await logActivity(req.user.id, req.user.username, 'product.import', 'product', '', `${created} جديد / ${updated} محدّث`, 1);
   res.json({ ok: true, created, updated });
 }));
 

@@ -11,6 +11,7 @@
     "reset-db": "node server/scripts/reset-db.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
     "express": "^4.21.2"
   },
   "engines": {
