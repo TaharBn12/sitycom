@@ -5,4 +5,4 @@
 // ضع هنا عنوان الخادم الكامل، مثال:
 //   window.API_BASE = "https://mon-app.onrender.com";
 // وبه فارغًا تبقى الطلبات على نفس الموقع (الوضع الافتراضي).
-window.API_BASE = "";
+window.API_BASE = "https://taharbn12.github.io/sitycom/index.html";
