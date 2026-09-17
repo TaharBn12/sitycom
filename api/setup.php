@@ -97,6 +97,21 @@ $adminUser = cfg('admin.username');
       <?php endforeach; ?>
     </div>
 
+    <h3 style="margin-top:22px">بيانات الاتصال (كما يقرأها التطبيق)</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13.5px">
+      <tr><th style="text-align:right;padding:6px;border-bottom:1px solid #eef2f7">العنصر</th><th style="text-align:right;padding:6px;border-bottom:1px solid #eef2f7">القيمة</th></tr>
+      <tr><td style="padding:6px;border-bottom:1px solid #f5f7fa">نوع القاعدة</td><td style="padding:6px;border-bottom:1px solid #f5f7fa"><code><?= htmlspecialchars(driver()) ?></code></td></tr>
+      <tr><td style="padding:6px;border-bottom:1px solid #f5f7fa">المضيف (Host)</td><td style="padding:6px;border-bottom:1px solid #f5f7fa"><code><?= htmlspecialchars((string) cfg('db.host')) ?></code></td></tr>
+      <tr><td style="padding:6px;border-bottom:1px solid #f5f7fa">اسم القاعدة</td><td style="padding:6px;border-bottom:1px solid #f5f7fa"><code><?= htmlspecialchars((string) cfg('db.name') ?: '⚠️ فارغ') ?></code></td></tr>
+      <tr><td style="padding:6px;border-bottom:1px solid #f5f7fa">المستخدم</td><td style="padding:6px;border-bottom:1px solid #f5f7fa"><code><?= htmlspecialchars((string) cfg('db.user') ?: '⚠️ فارغ') ?></code></td></tr>
+      <tr><td style="padding:6px;border-bottom:1px solid #f5f7fa">كلمة المرور</td><td style="padding:6px;border-bottom:1px solid #f5f7fa"><code><?= cfg('db.pass') === '' ? '⚠️ فارغة' : '••••••••' ?></code></td></tr>
+      <tr><td style="padding:6px;border-bottom:1px solid #f5f7fa">إصدار PHP</td><td style="padding:6px;border-bottom:1px solid #f5f7fa"><code><?= htmlspecialchars(PHP_VERSION) ?></code></td></tr>
+      <tr><td style="padding:6px;border-bottom:1px solid #f5f7fa">الامتدادات</td><td style="padding:6px">pdo_mysql: <?= extension_loaded('pdo_mysql') ? '<span class="ok">مفعّل</span>' : '<span class="bad">غير مفعّل</span>' ?>
+        · cURL: <?= extension_loaded('curl') ? '<span class="ok">مفعّل</span>' : '<span class="bad">غير مفعّل</span>' ?>
+        · json: <?= extension_loaded('json') ? '<span class="ok">مفعّل</span>' : '<span class="bad">غير مفعّل</span>' ?></td></tr>
+    </table>
+    <p class="muted">عدّل هذه القيم في <code>api/config.local.php</code></p>
+
     <h3 style="margin-top:22px">حالة Ecotrack</h3>
     <ul>
       <li>الرابط الأساسي: <code><?= htmlspecialchars($eco['base_url'] ?: 'غير مضبوط') ?></code></li>
