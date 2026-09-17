@@ -5,4 +5,7 @@
 // ضع هنا عنوان الخادم الكامل، مثال:
 //   window.API_BASE = "https://mon-app.onrender.com";
 // وبه فارغًا تبقى الطلبات على نفس الموقع (الوضع الافتراضي).
-window.API_BASE = "https://taharbn12.github.io/sitycom/index.html";
+// ⚠️ GitHub Pages يستضيف الواجهة فقط (ملفات ثابتة) — لا يشغّل خادم Node.
+// ضع هنا عنوان خادمك (Render/Railway/VPS) ليعمل تسجيل الدخول وإنشاء الحساب:
+//   window.API_BASE = "https://mon-api.onrender.com";
+window.API_BASE = "";
