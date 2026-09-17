@@ -1,0 +1,6 @@
+# حماية ملف الإعدادات المحلي (يحتوي بيانات القاعدة والتوكن)
+<FilesMatch "^(config\.local\.php|config\.local\.example\.php)$">
+  Require all denied
+</FilesMatch>
+
+Options -Indexes
