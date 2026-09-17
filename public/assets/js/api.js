@@ -6,7 +6,7 @@
 const API_BASE = (typeof window !== 'undefined' && window.API_BASE)
   ? String(window.API_BASE).replace(/\/+$/, '')
   : '';
-const url = (p) => API_BASE + p;
+const url = (p) => (API_BASE ? API_BASE + (p.startsWith('/') ? '' : '/') + p : p);
 
 const TOKEN_KEY = 'sitycom.token';
 const USER_KEY = 'sitycom.user';
@@ -49,8 +49,19 @@ async function request(method, path, body, options = {}) {
     return { ok: res.ok, blob: await res.blob() };
   }
 
+  // قراءة الجسم مرة واحدة فقط — تجنّب "body stream already read"
+  // عند استجابة غير JSON (صفحة خطأ HTML مثلًا من GitHub Pages)
+  const raw = await res.text();
   let data = null;
-  try { data = await res.json(); } catch { data = { ok: false, error: await res.text() }; }
+  try {
+    data = raw.trim() ? JSON.parse(raw) : null;
+  } catch {
+    data = null;
+  }
+  if (!data || typeof data !== 'object') {
+    const isJson = type.includes('application/json');
+    data = { ok: false, error: isJson ? (raw.trim() || `HTTP ${res.status}`) : `تعذر الاتصال بالخادم (HTTP ${res.status})` };
+  }
   if (!res.ok) {
     const err = new Error((data && data.error) || `HTTP ${res.status}`);
     err.payload = data;
